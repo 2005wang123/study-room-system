@@ -1,5 +1,9 @@
 # 自习室座位预约管理系统 (Study Room System)
 
+> 📖 **在线接口文档（GitHub Pages）：** [https://2005wang123.github.io/study-room-system/](https://2005wang123.github.io/study-room-system/)
+>
+> 无需本地启动后端即可查看，基于源码整理的全部接口说明（含请求参数与返回结构）。
+
 基于 **Spring Boot 3 + MyBatis-Plus + MySQL + Vue 3 + Vite** 的前后端分离自习室座位预约系统。
 
 ## 功能特性
