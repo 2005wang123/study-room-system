@@ -328,4 +328,7 @@ WHERE username = '你的学号';
 
 ## 📄 License
 
-本项目仅用于学习交流，未指定开源协议（All Rights Reserved）。
+本项目基于 [MIT License](LICENSE) 开源。
+
+版权所有 © 2026 [2005wang123](https://github.com/2005wang123)。保留所有权利。
+
