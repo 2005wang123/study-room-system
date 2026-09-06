@@ -20,133 +20,136 @@
   </div>
 </template>
 
-<script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue';
+<script setup lang="ts">
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 
-const ROW = 40;      // 每一档的高度
-const VISIBLE = 5;   // 可视行数
+const ROW = 40 // 每一档的高度
+const VISIBLE = 5 // 可视行数
 
-const props = defineProps({
-  // 当前选中时间（HH:mm）
-  modelValue: { type: String, default: '' },
-  // 可展示的所有档位（含禁用项）
-  options: { type: Array, default: () => [] },
-  // 禁用的档位（灰色且不可停留/选中）
-  disabledValues: { type: Array, default: () => [] }
-});
-const emit = defineEmits(['update:modelValue']);
+const props = withDefaults(
+  defineProps<{
+    // 当前选中时间（HH:mm）
+    modelValue: string
+    // 可展示的所有档位（含禁用项）
+    options: string[]
+    // 禁用的档位（灰色且不可停留/选中）
+    disabledValues: string[]
+  }>(),
+  { modelValue: '', options: () => [], disabledValues: () => [] }
+)
+const emit = defineEmits<{ (e: 'update:modelValue', value: string): void }>()
 
-const viewportEl = ref(null);
-const pad = ((VISIBLE - 1) * ROW) / 2;
+const viewportEl = ref<HTMLElement | null>(null)
+const pad = ((VISIBLE - 1) * ROW) / 2
 
-const disabledSet = computed(() => new Set(props.disabledValues));
-const isDisabledOpt = (opt) => disabledSet.value.has(opt);
+const disabledSet = computed(() => new Set(props.disabledValues))
+const isDisabledOpt = (opt: string): boolean => disabledSet.value.has(opt)
 
 // 可选中档位下标
 const enabledIndexes = computed(() => {
-  const list = [];
+  const list: number[] = []
   props.options.forEach((opt, i) => {
-    if (!disabledSet.value.has(opt)) list.push(i);
-  });
-  return list;
-});
+    if (!disabledSet.value.has(opt)) list.push(i)
+  })
+  return list
+})
 
-const currentIndex = computed(() => props.options.indexOf(props.modelValue));
+const currentIndex = computed(() => props.options.indexOf(props.modelValue))
 
-const scrollToIndex = (idx, smooth) => {
-  const el = viewportEl.value;
-  if (!el || idx == null) return;
-  const max = Math.max(0, el.scrollHeight - el.clientHeight);
-  const top = Math.min(Math.max(0, idx * ROW), max);
+const scrollToIndex = (idx: number, smooth: boolean) => {
+  const el = viewportEl.value
+  if (!el || idx == null) return
+  const max = Math.max(0, el.scrollHeight - el.clientHeight)
+  const top = Math.min(Math.max(0, idx * ROW), max)
   if (smooth) {
-    el.scrollTo({ top, behavior: 'smooth' });
+    el.scrollTo({ top, behavior: 'smooth' })
   } else {
-    el.scrollTop = top;
+    el.scrollTop = top
   }
-};
+}
 
-const selectIdx = (idx, smooth) => {
-  scrollToIndex(idx, smooth);
-  const opt = props.options[idx];
+const selectIdx = (idx: number, smooth: boolean) => {
+  scrollToIndex(idx, smooth)
+  const opt = props.options[idx]
   if (opt != null && opt !== props.modelValue) {
-    emit('update:modelValue', opt);
+    emit('update:modelValue', opt)
   }
-};
+}
 
-const nearestEnabled = (idx) => {
-  const list = enabledIndexes.value;
-  if (!list.length) return -1;
-  let best = list[0];
+const nearestEnabled = (idx: number): number => {
+  const list = enabledIndexes.value
+  if (!list.length) return -1
+  let best = list[0]
   for (const i of list) {
-    const dCur = Math.abs(i - idx);
-    const dBest = Math.abs(best - idx);
-    if (dCur < dBest || (dCur === dBest && i < best)) best = i;
+    const dCur = Math.abs(i - idx)
+    const dBest = Math.abs(best - idx)
+    if (dCur < dBest || (dCur === dBest && i < best)) best = i
   }
-  return best;
-};
+  return best
+}
 
 const scrollToCurrent = () => {
-  const el = viewportEl.value;
-  if (!el) return;
-  let i = props.options.indexOf(props.modelValue);
+  const el = viewportEl.value
+  if (!el) return
+  let i = props.options.indexOf(props.modelValue)
   if (i < 0) {
-    i = enabledIndexes.value[0];
-    if (i == null) return;
+    i = enabledIndexes.value[0]
+    if (i == null) return
   }
-  scrollToIndex(i, false);
-};
+  scrollToIndex(i, false)
+}
 
 // 用户滚动停止后，吸附到最近的可用档位
-let settleTimer = null;
+let settleTimer: number | null = null
 const onScroll = () => {
-  if (settleTimer) clearTimeout(settleTimer);
-  settleTimer = setTimeout(settle, 120);
-};
+  if (settleTimer) clearTimeout(settleTimer)
+  settleTimer = window.setTimeout(settle, 120)
+}
 const settle = () => {
-  const el = viewportEl.value;
-  if (!el || !props.options.length) return;
-  const idx = Math.round(el.scrollTop / ROW);
-  const target = nearestEnabled(idx);
-  if (target === -1) return;
-  selectIdx(target, target !== idx);
-};
+  const el = viewportEl.value
+  if (!el || !props.options.length) return
+  const idx = Math.round(el.scrollTop / ROW)
+  const target = nearestEnabled(idx)
+  if (target === -1) return
+  selectIdx(target, target !== idx)
+}
 
-const step = (dir) => {
-  const list = enabledIndexes.value;
-  if (!list.length) return;
-  const cur = currentIndex.value;
-  let pos = list.indexOf(cur);
-  if (pos === -1) pos = dir > 0 ? -1 : list.length;
-  const idx = list[pos + dir];
-  if (idx == null) return;
-  selectIdx(idx, true);
-};
+const step = (dir: number) => {
+  const list = enabledIndexes.value
+  if (!list.length) return
+  const cur = currentIndex.value
+  let pos = list.indexOf(cur)
+  if (pos === -1) pos = dir > 0 ? -1 : list.length
+  const idx = list[pos + dir]
+  if (idx == null) return
+  selectIdx(idx, true)
+}
 
-const canStep = (dir) => {
-  const list = enabledIndexes.value;
-  if (!list.length) return false;
-  const pos = list.indexOf(currentIndex.value);
-  if (dir < 0) return pos > 0;
-  return pos !== -1 && pos < list.length - 1;
-};
+const canStep = (dir: number): boolean => {
+  const list = enabledIndexes.value
+  if (!list.length) return false
+  const pos = list.indexOf(currentIndex.value)
+  if (dir < 0) return pos > 0
+  return pos !== -1 && pos < list.length - 1
+}
 
-const pick = (opt) => {
-  if (isDisabledOpt(opt)) return;
-  const idx = props.options.indexOf(opt);
-  if (idx !== -1) selectIdx(idx, true);
-};
+const pick = (opt: string) => {
+  if (isDisabledOpt(opt)) return
+  const idx = props.options.indexOf(opt)
+  if (idx !== -1) selectIdx(idx, true)
+}
 
 // 选项 / 选中值 / 禁用项变化后，把当前值滚到中间
 watch(
   () => props.options.join('|') + '#' + props.modelValue + '#' + props.disabledValues.join('|'),
   () => {
-    nextTick(() => requestAnimationFrame(scrollToCurrent));
+    nextTick(() => requestAnimationFrame(scrollToCurrent))
   }
-);
+)
 
 onMounted(() => {
-  nextTick(() => requestAnimationFrame(scrollToCurrent));
-});
+  nextTick(() => requestAnimationFrame(scrollToCurrent))
+})
 </script>
 
 <style scoped>

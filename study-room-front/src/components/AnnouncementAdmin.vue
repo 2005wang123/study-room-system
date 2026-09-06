@@ -25,9 +25,7 @@
         <option :value="1">已发布</option>
         <option :value="0">草稿/下架</option>
       </select>
-      <button class="primary-btn" @click="openCreate">
-        ➕ 新增公告
-      </button>
+      <button class="primary-btn" @click="openCreate">➕ 新增公告</button>
     </div>
 
     <!-- 新增/编辑表单 -->
@@ -45,7 +43,7 @@
           <option :value="0">草稿/下架（用户不可见）</option>
         </select>
         <button class="primary-btn" :disabled="saving" @click="handleSave">
-          {{ saving ? '保存中...' : (editingId ? '保存修改' : '确认发布') }}
+          {{ saving ? '保存中...' : editingId ? '保存修改' : '确认发布' }}
         </button>
         <button class="mini-btn" :disabled="saving" @click="closeForm">取消</button>
       </div>
@@ -101,156 +99,164 @@
   </div>
 </template>
 
-<script setup>
-import { ref, computed, onMounted } from 'vue';
-import {
-  getAdminAnnouncements,
-  createAnnouncement,
-  updateAnnouncement,
-  deleteAnnouncement
-} from '@/api/announcement';
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { getAdminAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement } from '@/api/announcement'
+import type { AnnouncementItem, AnnouncementPayload, ApiErrorShape, PageData } from '@/types/api'
 
-const emit = defineEmits(['toast', 'changed']);
+type ToastType = 'success' | 'error' | 'info' | 'warning'
 
-const list = ref([]);
-const loading = ref(false);
-const error = ref(null);
-const keyword = ref('');
-const statusFilter = ref('');
-const pageNum = ref(1);
-const pageSize = ref(10);
-const total = ref(0);
+const emit = defineEmits<{
+  (e: 'toast', payload: { message: string; type: ToastType }): void
+  (e: 'changed'): void
+}>()
 
-const formVisible = ref(false);
-const editingId = ref(null);
-const saving = ref(false);
-const actingId = ref(null);
-const form = ref({ title: '', content: '', status: 1 });
+const list = ref<AnnouncementItem[]>([])
+const loading = ref(false)
+const error = ref<string | null>(null)
+const keyword = ref('')
+const statusFilter = ref('')
+const pageNum = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)));
+const formVisible = ref(false)
+const editingId = ref<number | null>(null)
+const saving = ref(false)
+const actingId = ref<number | null>(null)
+const form = ref<AnnouncementPayload>({ title: '', content: '', status: 1 })
 
-const extractPage = (data) => {
-  if (data?.records) return data;
-  if (data?.list) return { records: data.list, total: data.total };
-  if (Array.isArray(data)) return { records: data, total: data.length };
-  return { records: [], total: 0 };
-};
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
-const toast = (message, type = 'info') => emit('toast', { message, type });
+const extractPage = (data: unknown): { records: AnnouncementItem[]; total: number } => {
+  const d = data as
+    PageData<AnnouncementItem> | { list: AnnouncementItem[]; total: number } | AnnouncementItem[] | null | undefined
+  if (d && Array.isArray(d)) return { records: d, total: d.length }
+  if (d && 'records' in d) return d
+  if (d && 'list' in d) return { records: d.list, total: d.total }
+  return { records: [], total: 0 }
+}
+
+const getApiErrorMessage = (err: unknown, fallback: string): string => {
+  const e = err as ApiErrorShape
+  return e?.response?.data?.message || e?.message || fallback
+}
+
+const toast = (message: string, type: ToastType = 'info') => emit('toast', { message, type })
 
 const fetchList = async () => {
-  loading.value = true;
-  error.value = null;
+  loading.value = true
+  error.value = null
   try {
     const res = await getAdminAnnouncements({
       pageNum: pageNum.value,
       pageSize: pageSize.value,
       keyword: keyword.value.trim() || undefined,
       status: statusFilter.value === '' ? undefined : Number(statusFilter.value)
-    });
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    else if (data?.data?.code === 200) data = data.data.data;
-    const page = extractPage(data);
-    list.value = page.records || [];
-    total.value = Number(page.total || list.value.length);
+    })
+    let data: unknown = res
+    if ((data as { code?: number })?.code === 200) data = (data as { data: PageData<AnnouncementItem> }).data
+    else if ((data as { data?: { code?: number } })?.data?.code === 200)
+      data = (data as { data: { data: PageData<AnnouncementItem> } }).data.data
+    const page = extractPage(data)
+    list.value = page.records || []
+    total.value = Number(page.total || list.value.length)
   } catch (err) {
-    error.value = err.response?.data?.message || err.message || '加载失败，请重试';
+    error.value = getApiErrorMessage(err, '加载失败，请重试')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const search = () => {
-  pageNum.value = 1;
-  fetchList();
-};
+  pageNum.value = 1
+  fetchList()
+}
 
-const goPage = (p) => {
-  if (p < 1 || p > totalPages.value) return;
-  pageNum.value = p;
-  fetchList();
-};
+const goPage = (p: number) => {
+  if (p < 1 || p > totalPages.value) return
+  pageNum.value = p
+  fetchList()
+}
 
 const openCreate = () => {
-  editingId.value = null;
-  form.value = { title: '', content: '', status: 1 };
-  formVisible.value = true;
-};
+  editingId.value = null
+  form.value = { title: '', content: '', status: 1 }
+  formVisible.value = true
+}
 
-const openEdit = (item) => {
-  editingId.value = item.id;
+const openEdit = (item: AnnouncementItem) => {
+  editingId.value = item.id
   form.value = {
     title: item.title || '',
     content: item.content || '',
     status: Number(item.status) === 1 ? 1 : 0
-  };
-  formVisible.value = true;
-};
+  }
+  formVisible.value = true
+}
 
 const closeForm = () => {
-  formVisible.value = false;
-  editingId.value = null;
-};
+  formVisible.value = false
+  editingId.value = null
+}
 
 const handleSave = async () => {
   if (!form.value.title || !form.value.title.trim()) {
-    toast('请输入公告标题', 'warning');
-    return;
+    toast('请输入公告标题', 'warning')
+    return
   }
   if (!form.value.content || !form.value.content.trim()) {
-    toast('请输入公告内容', 'warning');
-    return;
+    toast('请输入公告内容', 'warning')
+    return
   }
-  saving.value = true;
+  saving.value = true
   try {
-    const payload = {
+    const payload: AnnouncementPayload = {
       title: form.value.title.trim(),
       content: form.value.content.trim(),
       status: Number(form.value.status)
-    };
-    if (editingId.value) {
-      await updateAnnouncement(editingId.value, payload);
-      toast('✅ 公告已更新', 'success');
-    } else {
-      await createAnnouncement(payload);
-      toast('✅ 公告已发布', 'success');
     }
-    closeForm();
-    await fetchList();
-    emit('changed');
+    if (editingId.value) {
+      await updateAnnouncement(editingId.value, payload)
+      toast('✅ 公告已更新', 'success')
+    } else {
+      await createAnnouncement(payload)
+      toast('✅ 公告已发布', 'success')
+    }
+    closeForm()
+    await fetchList()
+    emit('changed')
   } catch (err) {
-    toast(`✗ ${err.response?.data?.message || err.message || '保存失败'}`, 'error');
+    toast(`✗ ${getApiErrorMessage(err, '保存失败')}`, 'error')
   } finally {
-    saving.value = false;
+    saving.value = false
   }
-};
+}
 
-const handleDelete = async (item) => {
-  if (!confirm(`确认删除公告「${item.title}」？删除后用户将无法查看。`)) return;
-  actingId.value = item.id;
+const handleDelete = async (item: AnnouncementItem) => {
+  if (!window.confirm(`确认删除公告「${item.title}」？删除后用户将无法查看。`)) return
+  actingId.value = item.id
   try {
-    await deleteAnnouncement(item.id);
-    toast('✅ 公告已删除', 'success');
-    await fetchList();
-    emit('changed');
+    await deleteAnnouncement(item.id)
+    toast('✅ 公告已删除', 'success')
+    await fetchList()
+    emit('changed')
   } catch (err) {
-    toast(`✗ ${err.response?.data?.message || err.message || '删除失败'}`, 'error');
+    toast(`✗ ${getApiErrorMessage(err, '删除失败')}`, 'error')
   } finally {
-    actingId.value = null;
+    actingId.value = null
   }
-};
+}
 
-const pad = n => String(n).padStart(2, '0');
-const formatTime = (time) => {
-  if (!time) return '-';
-  const t = String(time).replace('T', ' ');
-  const match = t.match(/^(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2})/);
-  if (match) return `${match[1]} ${match[2]}`;
-  return t;
-};
+const formatTime = (time?: string | null): string => {
+  if (!time) return '-'
+  const t = String(time).replace('T', ' ')
+  const match = t.match(/^(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2})/)
+  if (match) return `${match[1]} ${match[2]}`
+  return t
+}
 
-onMounted(fetchList);
+onMounted(fetchList)
 </script>
 
 <style scoped>
@@ -411,7 +417,10 @@ onMounted(fetchList);
   color: var(--text-secondary);
 }
 
-.state-icon { font-size: 44px; margin-bottom: 14px; }
+.state-icon {
+  font-size: 44px;
+  margin-bottom: 14px;
+}
 
 .loading-spinner {
   width: 36px;
@@ -423,7 +432,14 @@ onMounted(fetchList);
   margin-bottom: 14px;
 }
 
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .state-btn {
   margin-top: 14px;
@@ -515,8 +531,14 @@ onMounted(fetchList);
   white-space: nowrap;
 }
 
-.tag-ok { background: rgba(76, 175, 80, 0.16); color: #4caf50; }
-.tag-bad { background: rgba(244, 67, 54, 0.16); color: #f44336; }
+.tag-ok {
+  background: rgba(76, 175, 80, 0.16);
+  color: #4caf50;
+}
+.tag-bad {
+  background: rgba(244, 67, 54, 0.16);
+  color: #f44336;
+}
 
 .mini-btn {
   padding: 7px 14px;
@@ -580,6 +602,8 @@ onMounted(fetchList);
 }
 
 @media (max-width: 768px) {
-  .admin-page { padding: 16px; }
+  .admin-page {
+    padding: 16px;
+  }
 }
 </style>

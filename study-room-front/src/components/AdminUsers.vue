@@ -28,7 +28,11 @@
     <!-- 新增用户表单 -->
     <div v-if="showCreate" class="create-form">
       <input v-model="createForm.username" class="form-input" placeholder="用户名/学号（必填）" />
-      <input v-model="createForm.idCard" class="form-input" placeholder="完整身份证号（初始密码=后6位），或直接填6位数字初始密码" />
+      <input
+        v-model="createForm.idCard"
+        class="form-input"
+        placeholder="完整身份证号（初始密码=后6位），或直接填6位数字初始密码"
+      />
       <select v-model="createForm.role" class="form-input">
         <option :value="0">学生</option>
         <option :value="1">管理员</option>
@@ -66,20 +70,23 @@
             <div class="user-name">{{ u.username }}</div>
             <div class="user-meta">
               <span class="tag" :class="u.role === 1 ? 'tag-admin' : ''">{{ u.role === 1 ? '管理员' : '学生' }}</span>
-              <span class="tag" :class="u.status === 1 ? 'tag-ok' : 'tag-bad'">{{ u.status === 1 ? '正常' : '已禁用' }}</span>
+              <span class="tag" :class="u.status === 1 ? 'tag-ok' : 'tag-bad'">{{
+                u.status === 1 ? '正常' : '已禁用'
+              }}</span>
               <span v-if="u.isFirstLogin" class="tag tag-warn">首次登录</span>
+              <span class="tag tag-points">💎 积分：{{ u.points ?? '-' }}</span>
+              <span v-if="isPointBanned(u)" class="tag tag-ban">🚫 禁约至 {{ formatTime(u.bookBanUntil) }}</span>
               <span class="tag tag-time">{{ formatTime(u.createTime) }}</span>
             </div>
           </div>
         </div>
         <div class="user-actions">
+          <button class="mini-btn" :disabled="actingId === u.id" @click="handleAdjustPoints(u)">调整积分</button>
           <button class="mini-btn" :disabled="actingId === u.id" @click="handleResetPwd(u)">重置密码</button>
           <button class="mini-btn danger" :disabled="actingId === u.id" @click="handleDelete(u)">删除</button>
-          <button
-            class="mini-btn danger"
-            :disabled="actingId === u.id"
-            @click="handleToggleStatus(u)"
-          >{{ u.status === 1 ? '禁用' : '启用' }}</button>
+          <button class="mini-btn danger" :disabled="actingId === u.id" @click="handleToggleStatus(u)">
+            {{ u.status === 1 ? '禁用' : '启用' }}
+          </button>
         </div>
       </div>
     </div>
@@ -93,90 +100,115 @@
   </div>
 </template>
 
-<script setup>
-import { ref, computed, onMounted } from 'vue';
-import { getAdminUsers, createAdminUser, updateUserStatus, resetUserPassword, deleteAdminUser } from '@/api/user';
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import {
+  getAdminUsers,
+  createAdminUser,
+  updateUserStatus,
+  resetUserPassword,
+  deleteAdminUser,
+  adjustUserPoints
+} from '@/api/user'
+import type { AdminUser, ApiErrorShape, PageData } from '@/types/api'
 
-const emit = defineEmits(['toast']);
+const emit = defineEmits<{
+  (e: 'toast', payload: { message: string; type: 'success' | 'error' | 'info' | 'warning' }): void
+}>()
 
-const users = ref([]);
-const loading = ref(false);
-const error = ref(null);
-const keyword = ref('');
-const pageNum = ref(1);
-const pageSize = ref(10);
-const total = ref(0);
-const showCreate = ref(false);
-const creating = ref(false);
-const actingId = ref(null);
-const createForm = ref({ username: '', idCard: '', role: 0, status: 1 });
+const users = ref<AdminUser[]>([])
+const loading = ref(false)
+const error = ref<string | null>(null)
+const keyword = ref('')
+const pageNum = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
+const showCreate = ref(false)
+const creating = ref(false)
+const actingId = ref<number | null>(null)
+const createForm = ref({ username: '', idCard: '', role: 0, status: 1 })
 
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)));
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
-const extractPage = (data) => {
-  if (data?.records) return data;
-  if (data?.list) return { records: data.list, total: data.total };
-  if (Array.isArray(data)) return { records: data, total: data.length };
-  return { records: [], total: 0 };
-};
+const extractPage = (data: unknown): { records: AdminUser[]; total: number } => {
+  const d = data as PageData<AdminUser> | { list: AdminUser[]; total: number } | AdminUser[] | null | undefined
+  if (d && Array.isArray(d)) return { records: d, total: d.length }
+  if (d && 'records' in d) return d
+  if (d && 'list' in d) return { records: d.list, total: d.total }
+  return { records: [], total: 0 }
+}
 
 const fetchUsers = async () => {
-  loading.value = true;
-  error.value = null;
+  loading.value = true
+  error.value = null
   try {
     const res = await getAdminUsers({
       pageNum: pageNum.value,
       pageSize: pageSize.value,
       keyword: keyword.value || undefined
-    });
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    else if (data?.data?.code === 200) data = data.data.data;
-    const page = extractPage(data);
-    users.value = page.records || [];
-    total.value = page.total || users.value.length;
+    })
+    let data: unknown = res
+    if ((data as { code?: number })?.code === 200) data = (data as { data: PageData<AdminUser> }).data
+    else if ((data as { data?: { code?: number } })?.data?.code === 200)
+      data = (data as { data: { data: PageData<AdminUser> } }).data.data
+    const page = extractPage(data)
+    users.value = page.records || []
+    total.value = page.total || users.value.length
   } catch (err) {
-    error.value = err.response?.data?.message || err.message || '加载失败，请重试';
+    error.value = getApiErrorMessage(err, '加载失败，请重试')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
-const search = () => { pageNum.value = 1; fetchUsers(); };
-const goPage = (p) => { pageNum.value = p; fetchUsers(); };
+const getApiErrorMessage = (err: unknown, fallback: string): string => {
+  const e = err as ApiErrorShape
+  return e?.response?.data?.message || e?.message || fallback
+}
+
+const search = () => {
+  pageNum.value = 1
+  fetchUsers()
+}
+const goPage = (p: number) => {
+  pageNum.value = p
+  fetchUsers()
+}
 
 const handleCreate = async () => {
   if (!createForm.value.username.trim()) {
-    emit('toast', { message: '✗ 用户名不能为空', type: 'error' });
-    return;
+    emit('toast', { message: '✗ 用户名不能为空', type: 'error' })
+    return
   }
-  creating.value = true;
+  creating.value = true
   try {
     const res = await createAdminUser({
       username: createForm.value.username.trim(),
       idCard: createForm.value.idCard || undefined,
       role: Number(createForm.value.role),
       status: Number(createForm.value.status)
-    });
-    const initialPwd = res?.data;
+    })
+    const initialPwd = res?.data
     emit('toast', {
       message: initialPwd
         ? `✅ ${res.message || '用户创建成功'}，初始密码：${initialPwd}`
         : '✅ ' + (res.message || '用户创建成功'),
       type: 'success'
-    });
-    showCreate.value = false;
-    createForm.value = { username: '', idCard: '', role: 0, status: 1 };
-    await fetchUsers();
+    })
+    showCreate.value = false
+    createForm.value = { username: '', idCard: '', role: 0, status: 1 }
+    await fetchUsers()
   } catch (err) {
-    const code = err.response?.data?.code;
-    const msg = err.response?.data?.message || err.message || '创建失败';
+    const code = (err as ApiErrorShape).response?.data?.code
+    const msg = getApiErrorMessage(err, '创建失败')
     // 用户名已被删除：弹窗确认后重建
     if (code === 409 && msg.includes('已被删除')) {
-      const ok = window.confirm(`用户名「${createForm.value.username}」已被删除。是否重建该用户？重建后将生成新的初始密码，原历史预约记录保留。`);
+      const ok = window.confirm(
+        `用户名「${createForm.value.username}」已被删除。是否重建该用户？重建后将生成新的初始密码，原历史预约记录保留。`
+      )
       if (!ok) {
-        emit('toast', { message: '已取消重建', type: 'info' });
-        return;
+        emit('toast', { message: '已取消重建', type: 'info' })
+        return
       }
       try {
         const res2 = await createAdminUser({
@@ -185,82 +217,108 @@ const handleCreate = async () => {
           role: Number(createForm.value.role),
           status: Number(createForm.value.status),
           rebuild: true
-        });
-        const initialPwd = res2?.data;
+        })
+        const initialPwd = res2?.data
         emit('toast', {
           message: initialPwd ? `✅ 用户已重建，初始密码：${initialPwd}` : '✅ 用户已重建',
           type: 'success'
-        });
-        showCreate.value = false;
-        createForm.value = { username: '', idCard: '', role: 0, status: 1 };
-        await fetchUsers();
+        })
+        showCreate.value = false
+        createForm.value = { username: '', idCard: '', role: 0, status: 1 }
+        await fetchUsers()
       } catch (err2) {
-        const msg2 = err2.response?.data?.message || err2.message || '重建失败';
-        emit('toast', { message: `✗ ${msg2}`, type: 'error' });
+        emit('toast', { message: `✗ ${getApiErrorMessage(err2, '重建失败')}`, type: 'error' })
       }
-      return;
+      return
     }
-    emit('toast', { message: `✗ ${msg}`, type: 'error' });
+    emit('toast', { message: `✗ ${msg}`, type: 'error' })
   } finally {
-    creating.value = false;
+    creating.value = false
   }
-};
+}
 
-const handleDelete = async (u) => {
-  if (!window.confirm(`确定删除用户 ${u.username} 吗？删除后该账号将无法登录（历史预约记录保留）。`)) return;
-  actingId.value = u.id;
+const isPointBanned = (u: AdminUser): boolean => {
+  if (!u?.bookBanUntil) return false
+  return new Date(u.bookBanUntil).getTime() > Date.now()
+}
+
+const handleAdjustPoints = async (u: AdminUser) => {
+  const cur = u.points ?? '-'
+  const input = window.prompt(
+    `调整用户「${u.username}」的信用积分\n当前积分：${cur}\n请输入变动值（正数加分，负数扣分）：`,
+    '100'
+  )
+  if (input === null || input.trim() === '') return
+  const delta = Number(input.trim())
+  if (!Number.isInteger(delta) || delta === 0) {
+    emit('toast', { message: '✗ 请输入非0整数（正数加分，负数扣分）', type: 'error' })
+    return
+  }
+  actingId.value = u.id
   try {
-    const res = await deleteAdminUser(u.id);
-    emit('toast', { message: '✅ ' + (res.message || '用户已删除'), type: 'success' });
-    await fetchUsers();
+    const res = await adjustUserPoints(u.id, delta)
+    emit('toast', { message: '✅ ' + (res?.message || '积分已调整'), type: 'success' })
+    await fetchUsers()
   } catch (err) {
-    const msg = err.response?.data?.message || err.message || '删除失败';
-    emit('toast', { message: `✗ ${msg}`, type: 'error' });
+    emit('toast', { message: `✗ ${getApiErrorMessage(err, '积分调整失败')}`, type: 'error' })
+    await fetchUsers()
   } finally {
-    actingId.value = null;
+    actingId.value = null
   }
-};
+}
 
-const handleToggleStatus = async (u) => {
-  const target = u.status === 1 ? 0 : 1;
-  if (!window.confirm(`确定${target === 1 ? '启用' : '禁用'}用户 ${u.username} 吗？`)) return;
-  actingId.value = u.id;
+const handleDelete = async (u: AdminUser) => {
+  if (!window.confirm(`确定删除用户 ${u.username} 吗？删除后该账号将无法登录（历史预约记录保留）。`)) return
+  actingId.value = u.id
   try {
-    const res = await updateUserStatus(u.id, target);
-    emit('toast', { message: '✅ ' + (res.message || '操作成功'), type: 'success' });
-    await fetchUsers();
+    const res = await deleteAdminUser(u.id)
+    emit('toast', { message: '✅ ' + (res.message || '用户已删除'), type: 'success' })
+    await fetchUsers()
   } catch (err) {
-    const msg = err.response?.data?.message || err.message || '操作失败';
-    emit('toast', { message: `✗ ${msg}`, type: 'error' });
+    emit('toast', { message: `✗ ${getApiErrorMessage(err, '删除失败')}`, type: 'error' })
   } finally {
-    actingId.value = null;
+    actingId.value = null
   }
-};
+}
 
-const handleResetPwd = async (u) => {
-  if (!window.confirm(`确定重置用户 ${u.username} 的密码吗？重置后将显示临时密码，请转告用户尽快修改。`)) return;
-  actingId.value = u.id;
+const handleToggleStatus = async (u: AdminUser) => {
+  const target = u.status === 1 ? 0 : 1
+  if (!window.confirm(`确定${target === 1 ? '启用' : '禁用'}用户 ${u.username} 吗？`)) return
+  actingId.value = u.id
   try {
-    const res = await resetUserPassword(u.id);
-    const temp = res?.data;
+    const res = await updateUserStatus(u.id, target)
+    emit('toast', { message: '✅ ' + (res.message || '操作成功'), type: 'success' })
+    await fetchUsers()
+  } catch (err) {
+    emit('toast', { message: `✗ ${getApiErrorMessage(err, '操作失败')}`, type: 'error' })
+  } finally {
+    actingId.value = null
+  }
+}
+
+const handleResetPwd = async (u: AdminUser) => {
+  if (!window.confirm(`确定重置用户 ${u.username} 的密码吗？重置后将显示临时密码，请转告用户尽快修改。`)) return
+  actingId.value = u.id
+  try {
+    const res = await resetUserPassword(u.id)
+    const temp = res?.data
     emit('toast', {
       message: temp ? `✅ 密码已重置，临时密码：${temp}` : '✅ 密码已重置',
       type: 'success'
-    });
+    })
   } catch (err) {
-    const msg = err.response?.data?.message || err.message || '重置失败';
-    emit('toast', { message: `✗ ${msg}`, type: 'error' });
+    emit('toast', { message: `✗ ${getApiErrorMessage(err, '重置失败')}`, type: 'error' })
   } finally {
-    actingId.value = null;
+    actingId.value = null
   }
-};
+}
 
-const formatTime = (t) => {
-  if (!t) return '-';
-  return String(t).replace('T', ' ').slice(0, 16);
-};
+const formatTime = (t?: string | null): string => {
+  if (!t) return '-'
+  return String(t).replace('T', ' ').slice(0, 16)
+}
 
-onMounted(fetchUsers);
+onMounted(fetchUsers)
 </script>
 
 <style scoped>
@@ -391,7 +449,10 @@ onMounted(fetchUsers);
   color: var(--text-secondary);
 }
 
-.state-icon { font-size: 44px; margin-bottom: 14px; }
+.state-icon {
+  font-size: 44px;
+  margin-bottom: 14px;
+}
 
 .loading-spinner {
   width: 36px;
@@ -403,7 +464,14 @@ onMounted(fetchUsers);
   margin-bottom: 14px;
 }
 
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .state-btn {
   margin-top: 14px;
@@ -476,11 +544,34 @@ onMounted(fetchUsers);
   color: var(--text-secondary);
 }
 
-.tag-admin { background: rgba(102, 126, 234, 0.2); color: #667eea; }
-.tag-ok { background: rgba(76, 175, 80, 0.16); color: #4caf50; }
-.tag-bad { background: rgba(244, 67, 54, 0.16); color: #f44336; }
-.tag-warn { background: rgba(255, 152, 0, 0.16); color: #ff9800; }
-.tag-time { background: transparent; color: var(--text-secondary); }
+.tag-admin {
+  background: rgba(102, 126, 234, 0.2);
+  color: #667eea;
+}
+.tag-ok {
+  background: rgba(76, 175, 80, 0.16);
+  color: #4caf50;
+}
+.tag-bad {
+  background: rgba(244, 67, 54, 0.16);
+  color: #f44336;
+}
+.tag-warn {
+  background: rgba(255, 152, 0, 0.16);
+  color: #ff9800;
+}
+.tag-time {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.tag-points {
+  background: rgba(255, 193, 7, 0.16);
+  color: #b8860b;
+}
+.tag-ban {
+  background: rgba(244, 67, 54, 0.16);
+  color: #f44336;
+}
 
 .user-actions {
   display: flex;
@@ -550,7 +641,8 @@ onMounted(fetchUsers);
 }
 
 @media (max-width: 768px) {
-  .admin-page { padding: 16px; }
+  .admin-page {
+    padding: 16px;
+  }
 }
 </style>
-

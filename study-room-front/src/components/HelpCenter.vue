@@ -73,16 +73,16 @@
       <section v-show="activeTab === 'faq'" class="help-pane">
         <div class="faq-search">
           <span class="faq-search-icon">🔍</span>
-          <input v-model="keyword" class="faq-search-input" type="text" placeholder="搜索常见问题，如：取消 / 违约 / 签到" />
+          <input
+            v-model="keyword"
+            class="faq-search-input"
+            type="text"
+            placeholder="搜索常见问题，如：取消 / 违约 / 签到"
+          />
         </div>
         <div v-if="filteredFaqs.length === 0" class="faq-empty">没有找到相关的问题，可联系管理员咨询</div>
         <div v-else class="faq-list">
-          <div
-            v-for="(faq, idx) in filteredFaqs"
-            :key="faq.q"
-            class="faq-item"
-            :class="{ open: openIndex === idx }"
-          >
+          <div v-for="(faq, idx) in filteredFaqs" :key="faq.q" class="faq-item" :class="{ open: openIndex === idx }">
             <button class="faq-question" @click="toggleFaq(idx)">
               <span class="faq-q">{{ faq.q }}</span>
               <span class="faq-arrow">{{ openIndex === idx ? '▾' : '▸' }}</span>
@@ -111,12 +111,12 @@
   </div>
 </template>
 
-<script setup>
-import { ref, computed } from 'vue';
+<script setup lang="ts">
+import { ref, computed } from 'vue'
 
-const activeTab = ref('guide');
-const keyword = ref('');
-const openIndex = ref(-1);
+const activeTab = ref('guide')
+const keyword = ref('')
+const openIndex = ref(-1)
 
 const tabs = [
   { id: 'guide', icon: '📖', label: '使用指南' },
@@ -124,15 +124,24 @@ const tabs = [
   { id: 'rules', icon: '📏', label: '预约规则' },
   { id: 'notice', icon: '⚠️', label: '注意事项' },
   { id: 'contact', icon: '📞', label: '联系我们' }
-];
+]
 
 const guideSteps = [
-  { title: '登录系统', desc: '点击左侧「点击登录」或进入「个人中心」，使用学号和密码登录。初始密码为身份证号后 6 位，首次登录请及时修改。' },
+  {
+    title: '登录系统',
+    desc: '点击左侧「点击登录」或进入「个人中心」，使用学号和密码登录。初始密码为身份证号后 6 位，首次登录请及时修改。'
+  },
   { title: '选择座位', desc: '在「座位地图」中点击绿色（空闲）座位即可预约；有楼层结构图时，也可直接点击图中座位。' },
-  { title: '选择日期与时间', desc: '开放时间 08:00 - 21:30，按 10 分钟一档选择开始/结束时间。当天只能约当前时间之后的时段，提前一天预约可约全天。' },
+  {
+    title: '选择日期与时间',
+    desc: '开放时间 08:00 - 21:30，按 10 分钟一档选择开始/结束时间。当天只能约当前时间之后的时段，提前一天预约可约全天。'
+  },
   { title: '确认预约', desc: '核对日期、座位和时间段后点击「确认预约」，成功后座位会显示为已占用或部分占用状态。' },
-  { title: '到馆签到使用', desc: '预约开始前 30 分钟即可签到，最晚需在预约结束前完成签到；到结束仍未签到将被记为违约。' }
-];
+  {
+    title: '到馆签到使用',
+    desc: '预约开始前 30 分钟即可签到，最晚需在预约结束前完成签到；到结束仍未签到将被记为违约。'
+  }
+]
 
 const rules = [
   { icon: '⏰', text: '开放时间：每日 08:00 - 21:30' },
@@ -141,7 +150,7 @@ const rules = [
   { icon: '📅', text: '当天预约需至少提前 10 分钟；提前一天预约可约全天' },
   { icon: '⚠️', text: '到预约结束仍未签到将记为违约，请及时取消不用的预约' },
   { icon: '🛠️', text: '维修中的座位不可预约' }
-];
+]
 
 const notices = [
   { icon: '⏰', text: '开放时间 08:00 - 21:30，按 10 分钟一档；当天只能约当前时间之后的时段，提前一天预约可约全天。' },
@@ -149,12 +158,15 @@ const notices = [
   { icon: '⚠️', text: '到预约结束仍未签到，将被记为「已违约」，该时段座位会自动释放。' },
   { icon: '🚫', text: '违约记录会保留在「预约记录」中；如无法到馆，请提前取消预约，避免被记为违约。' },
   { icon: '✅', text: '使用中超过结束时间会自动「已完成」并释放座位，不算违约；离开时请及时签退。' }
-];
+]
 
 const faqs = [
   {
     q: '如何预约座位？',
-    a: ['进入「座位地图」，点击绿色（空闲）座位，选择日期和预约时间段后点击「确认预约」即可。', '预约成功后，该座位将显示为占用状态。']
+    a: [
+      '进入「座位地图」，点击绿色（空闲）座位，选择日期和预约时间段后点击「确认预约」即可。',
+      '预约成功后，该座位将显示为占用状态。'
+    ]
   },
   {
     q: '如何取消预约？',
@@ -166,7 +178,10 @@ const faqs = [
   },
   {
     q: '预约时段有什么限制？',
-    a: ['自习室开放时间为每日 08:00 - 21:30，预约时间必须在此范围内。', '当天预约的开始时间不能早于当前时间，请至少提前10分钟；提前一天预约可约全天。']
+    a: [
+      '自习室开放时间为每日 08:00 - 21:30，预约时间必须在此范围内。',
+      '当天预约的开始时间不能早于当前时间，请至少提前10分钟；提前一天预约可约全天。'
+    ]
   },
   {
     q: '为什么提示「已有正在进行的预约」？',
@@ -174,7 +189,10 @@ const faqs = [
   },
   {
     q: '什么是违约？什么情况会被记违约？',
-    a: ['预约后若始终未签到，直到预约结束时间仍未签到，将被系统记为违约。', '只要在预约结束前完成签到（可提前 30 分钟签到）就不会违约；如不能到馆，请提前在「预约记录」中取消预约。']
+    a: [
+      '预约后若始终未签到，直到预约结束时间仍未签到，将被系统记为违约。',
+      '只要在预约结束前完成签到（可提前 30 分钟签到）就不会违约；如不能到馆，请提前在「预约记录」中取消预约。'
+    ]
   },
   {
     q: '忘记密码怎么办？',
@@ -182,26 +200,29 @@ const faqs = [
   },
   {
     q: '如何修改密码？',
-    a: ['进入「个人中心」，在「修改密码」区域输入当前密码和新密码即可。', '密码需包含大小写字母、数字和特殊字符，长度不少于8位。']
+    a: [
+      '进入「个人中心」，在「修改密码」区域输入当前密码和新密码即可。',
+      '密码需包含大小写字母、数字和特殊字符，长度不少于8位。'
+    ]
   }
-];
+]
 
 const contacts = [
   { icon: '📍', label: '自习室位置', value: '图书馆三楼 / 四楼' },
   { icon: '🕐', label: '服务时间', value: '每日 08:00 - 21:30' },
   { icon: '📧', label: '意见反馈', value: 'service@studyroom.example.com' },
   { icon: '☎️', label: '联系电话', value: '010-8888-6666' }
-];
+]
 
 const filteredFaqs = computed(() => {
-  const kw = keyword.value.trim().toLowerCase();
-  if (!kw) return faqs;
-  return faqs.filter(f => f.q.toLowerCase().includes(kw) || f.a.some(line => line.toLowerCase().includes(kw)));
-});
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return faqs
+  return faqs.filter((f) => f.q.toLowerCase().includes(kw) || f.a.some((line) => line.toLowerCase().includes(kw)))
+})
 
-const toggleFaq = (idx) => {
-  openIndex.value = openIndex.value === idx ? -1 : idx;
-};
+const toggleFaq = (idx: number) => {
+  openIndex.value = openIndex.value === idx ? -1 : idx
+}
 </script>
 
 <style scoped>

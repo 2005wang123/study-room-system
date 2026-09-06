@@ -34,7 +34,9 @@
         class="filter-tab"
         :class="{ active: currentTab === tab.value }"
         @click="currentTab = tab.value"
-      >{{ tab.label }}</button>
+      >
+        {{ tab.label }}
+      </button>
     </div>
 
     <!-- 状态区 -->
@@ -57,11 +59,7 @@
 
     <!-- 预约列表 -->
     <div v-else class="record-list">
-      <div
-        v-for="record in filteredRecords"
-        :key="record.id"
-        class="record-card"
-      >
+      <div v-for="record in filteredRecords" :key="record.id" class="record-card">
         <div class="record-main">
           <div class="record-seat">
             <span class="seat-badge">🪑 {{ record.seatNo || '未知座位' }}</span>
@@ -111,11 +109,7 @@
         </div>
 
         <div v-if="canDelete(record.status)" class="record-actions">
-          <button
-            class="delete-btn"
-            :disabled="actioningId === record.id"
-            @click="handleDelete(record)"
-          >
+          <button class="delete-btn" :disabled="actioningId === record.id" @click="handleDelete(record)">
             {{ actioningId === record.id ? '处理中...' : '🗑️ 删除记录' }}
           </button>
         </div>
@@ -124,165 +118,176 @@
   </div>
 </template>
 
-<script setup>
-import { ref, computed, onMounted } from 'vue';
-import { getMyReservations, cancelBooking, checkIn, checkOut, deleteReservation } from '@/api/seat';
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { getMyReservations, cancelBooking, checkIn, checkOut, deleteReservation } from '@/api/seat'
+import type { ApiErrorShape, ReservationVO } from '@/types/api'
 
-const emit = defineEmits(['toast', 'go-home']);
+const emit = defineEmits<{
+  (e: 'toast', payload: { message: string; type: 'success' | 'error' | 'info' | 'warning' }): void
+  (e: 'go-home'): void
+}>()
 
-const records = ref([]);
-const loading = ref(false);
-const loaded = ref(false);
-const error = ref(null);
-const actioningId = ref(null);
-const currentTab = ref('all');
+const records = ref<ReservationVO[]>([])
+const loading = ref(false)
+const loaded = ref(false)
+const error = ref<string | null>(null)
+const actioningId = ref<number | null>(null)
+const currentTab = ref('all')
 
-const STATUS = {
+const STATUS: Record<number, { text: string; cls: string }> = {
   0: { text: '待签到', cls: 'pending' },
   1: { text: '使用中', cls: 'using' },
   2: { text: '已完成', cls: 'done' },
   3: { text: '已违约', cls: 'violated' },
   4: { text: '已取消', cls: 'cancelled' }
-};
+}
 
 const tabs = [
   { value: 'all', label: '全部' },
   { value: 'active', label: '进行中' },
   { value: 'done', label: '已完成' },
   { value: 'ended', label: '已结束' }
-];
+]
 
-const activeCount = computed(() => records.value.filter(r => isActive(r.status)).length);
-const completedCount = computed(() => records.value.filter(r => Number(r.status) === 2).length);
-const endedCount = computed(() => records.value.filter(r => Number(r.status) === 3 || Number(r.status) === 4).length);
+const isActive = (status: number | string): boolean => Number(status) === 0 || Number(status) === 1
+
+const activeCount = computed(() => records.value.filter((r) => isActive(r.status)).length)
+const completedCount = computed(() => records.value.filter((r) => Number(r.status) === 2).length)
+const endedCount = computed(() => records.value.filter((r) => Number(r.status) === 3 || Number(r.status) === 4).length)
 
 const filteredRecords = computed(() => {
-  const list = records.value;
+  const list = records.value
   switch (currentTab.value) {
-    case 'active': return list.filter(r => isActive(r.status));
-    case 'done': return list.filter(r => Number(r.status) === 2);
-    case 'ended': return list.filter(r => Number(r.status) === 3 || Number(r.status) === 4);
-    default: return list;
+    case 'active':
+      return list.filter((r) => isActive(r.status))
+    case 'done':
+      return list.filter((r) => Number(r.status) === 2)
+    case 'ended':
+      return list.filter((r) => Number(r.status) === 3 || Number(r.status) === 4)
+    default:
+      return list
   }
-});
+})
 
-const isActive = (status) => Number(status) === 0 || Number(status) === 1;
+const getStatusText = (status: number | string): string => STATUS[Number(status)]?.text || '未知'
 
-const getStatusText = (status) => STATUS[Number(status)]?.text || '未知';
-
-const pad = n => String(n).padStart(2, '0');
-
-const formatTime = (time) => {
-  if (!time) return '-';
+const formatTime = (time?: string | null): string => {
+  if (!time) return '-'
   // 兼容 "2026-08-25T10:00:00" 与 "2026-08-25 10:00:00"
-  const t = String(time).replace('T', ' ');
-  const match = t.match(/^(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2})/);
-  if (match) return `${match[1]} ${match[2]}`;
-  return t;
-};
+  const t = String(time).replace('T', ' ')
+  const match = t.match(/^(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2})/)
+  if (match) return `${match[1]} ${match[2]}`
+  return t
+}
 
-const getDuration = (record) => {
-  const start = new Date(record.startTime);
-  const end = new Date(record.endTime);
-  if (isNaN(start) || isNaN(end)) return '-';
-  const mins = Math.round((end - start) / 60000);
-  if (mins <= 0) return '-';
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h > 0 && m > 0) return `${h}小时${m}分钟`;
-  if (h > 0) return `${h}小时`;
-  return `${m}分钟`;
-};
+const getDuration = (record: ReservationVO): string => {
+  const start = new Date(record.startTime)
+  const end = new Date(record.endTime)
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return '-'
+  const mins = Math.round((end.getTime() - start.getTime()) / 60000)
+  if (mins <= 0) return '-'
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  if (h > 0 && m > 0) return `${h}小时${m}分钟`
+  if (h > 0) return `${h}小时`
+  return `${m}分钟`
+}
 
-const extractList = (data) => {
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.rows)) return data.rows;
-  if (Array.isArray(data?.list)) return data.list;
-  if (Array.isArray(data?.records)) return data.records;
-  return [];
-};
+const extractList = (data: unknown): ReservationVO[] => {
+  if (Array.isArray(data)) return data
+  const d = data as { rows?: ReservationVO[]; list?: ReservationVO[]; records?: ReservationVO[] } | null
+  if (Array.isArray(d?.rows)) return d!.rows!
+  if (Array.isArray(d?.list)) return d!.list!
+  if (Array.isArray(d?.records)) return d!.records!
+  return []
+}
+
+const getApiErrorMessage = (err: unknown, fallback: string): string => {
+  const e = err as ApiErrorShape
+  return e?.response?.data?.message || e?.message || fallback
+}
 
 const fetchRecords = async () => {
-  loading.value = true;
-  error.value = null;
+  loading.value = true
+  error.value = null
   try {
-    const res = await getMyReservations();
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    else if (data?.data?.code === 200) data = data.data.data;
-    records.value = extractList(data);
-    loaded.value = true;
+    const res = await getMyReservations()
+    let data: unknown = res
+    if ((data as { code?: number })?.code === 200) data = (data as { data: unknown }).data
+    else if ((data as { data?: { code?: number } })?.data?.code === 200)
+      data = (data as { data: { data: unknown } }).data.data
+    records.value = extractList(data)
+    loaded.value = true
   } catch (err) {
-    error.value = err.response?.data?.message || err.message || '加载失败，请重试';
+    error.value = getApiErrorMessage(err, '加载失败，请重试')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
-const handleCancel = async (record) => {
-  if (!window.confirm(`确定取消 ${record.seatNo || record.seatId} 号座位的预约吗？`)) return;
-  actioningId.value = record.id;
+const handleCancel = async (record: ReservationVO) => {
+  if (!window.confirm(`确定取消 ${record.seatNo || record.seatId} 号座位的预约吗？`)) return
+  actioningId.value = record.id
   try {
-    await cancelBooking(record.seatId, record.id);
-    emit('toast', { message: '✅ 预约已取消', type: 'success' });
-    await fetchRecords();
+    await cancelBooking(record.seatId, record.id)
+    emit('toast', { message: '✅ 预约已取消', type: 'success' })
+    await fetchRecords()
   } catch (err) {
-    const msg = err.response?.data?.message || err.message || '取消失败，请重试';
-    emit('toast', { message: `✗ ${msg}`, type: 'error' });
-    await fetchRecords();
+    emit('toast', { message: `✗ ${getApiErrorMessage(err, '取消失败，请重试')}`, type: 'error' })
+    await fetchRecords()
   } finally {
-    actioningId.value = null;
+    actioningId.value = null
   }
-};
+}
 
-const canDelete = (status) => [2, 3, 4].includes(Number(status));
+const canDelete = (status: number | string): boolean => [2, 3, 4].includes(Number(status))
 
-const handleDelete = async (record) => {
-  if (!window.confirm(`确定删除 ${record.seatNo || record.seatId} 号座位的这条预约记录吗？删除后不可恢复。`)) return;
-  actioningId.value = record.id;
+const handleDelete = async (record: ReservationVO) => {
+  if (!window.confirm(`确定删除 ${record.seatNo || record.seatId} 号座位的这条预约记录吗？删除后不可恢复。`)) return
+  actioningId.value = record.id
   try {
-    await deleteReservation(record.id);
-    emit('toast', { message: '✅ 预约记录已删除', type: 'success' });
-    await fetchRecords();
+    await deleteReservation(record.id)
+    emit('toast', { message: '✅ 预约记录已删除', type: 'success' })
+    await fetchRecords()
   } catch (err) {
-    const msg = err.response?.data?.message || err.message || '删除失败，请重试';
-    emit('toast', { message: `✗ ${msg}`, type: 'error' });
+    emit('toast', { message: `✗ ${getApiErrorMessage(err, '删除失败，请重试')}`, type: 'error' })
   } finally {
-    actioningId.value = null;
+    actioningId.value = null
   }
-};
+}
 
-const handleCheckIn = async (record) => {
-  if (!window.confirm(`确认对 ${record.seatNo || record.seatId} 号座位签到吗？`)) return;
-  actioningId.value = record.id;
+const handleCheckIn = async (record: ReservationVO) => {
+  if (!window.confirm(`确认对 ${record.seatNo || record.seatId} 号座位签到吗？`)) return
+  actioningId.value = record.id
   try {
-    await checkIn(record.id);
-    emit('toast', { message: '✅ 签到成功，请按时到座使用', type: 'success' });
-    await fetchRecords();
+    await checkIn(record.id)
+    emit('toast', { message: '✅ 签到成功，请按时到座使用', type: 'success' })
+    await fetchRecords()
   } catch (err) {
-    const msg = err.response?.data?.message || err.message || '签到失败，请重试';
-    emit('toast', { message: `✗ ${msg}`, type: 'error' });
+    emit('toast', { message: `✗ ${getApiErrorMessage(err, '签到失败，请重试')}`, type: 'error' })
+    // 签到失败后刷新记录：若因预约已结束被记为违约，界面应立即显示“已违约”
+    await fetchRecords()
   } finally {
-    actioningId.value = null;
+    actioningId.value = null
   }
-};
+}
 
-const handleCheckOut = async (record) => {
-  if (!window.confirm(`确认结束 ${record.seatNo || record.seatId} 号座位使用并签退吗？`)) return;
-  actioningId.value = record.id;
+const handleCheckOut = async (record: ReservationVO) => {
+  if (!window.confirm(`确认结束 ${record.seatNo || record.seatId} 号座位使用并签退吗？`)) return
+  actioningId.value = record.id
   try {
-    await checkOut(record.id);
-    emit('toast', { message: '✅ 签退成功，座位已释放', type: 'success' });
-    await fetchRecords();
+    await checkOut(record.id)
+    emit('toast', { message: '✅ 签退成功，座位已释放', type: 'success' })
+    await fetchRecords()
   } catch (err) {
-    const msg = err.response?.data?.message || err.message || '签退失败，请重试';
-    emit('toast', { message: `✗ ${msg}`, type: 'error' });
+    emit('toast', { message: `✗ ${getApiErrorMessage(err, '签退失败，请重试')}`, type: 'error' })
   } finally {
-    actioningId.value = null;
+    actioningId.value = null
   }
-};
+}
 
-onMounted(fetchRecords);
+onMounted(fetchRecords)
 </script>
 
 <style scoped>
@@ -341,9 +346,15 @@ onMounted(fetchRecords);
   margin-top: 4px;
 }
 
-.stat-card.active .stat-value { color: #667eea; }
-.stat-card.done .stat-value { color: #4caf50; }
-.stat-card.ended .stat-value { color: #ff9800; }
+.stat-card.active .stat-value {
+  color: #667eea;
+}
+.stat-card.done .stat-value {
+  color: #4caf50;
+}
+.stat-card.ended .stat-value {
+  color: #ff9800;
+}
 
 /* 筛选 Tab */
 .filter-tabs {
@@ -401,8 +412,12 @@ onMounted(fetchRecords);
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .state-btn {
@@ -472,11 +487,26 @@ onMounted(fetchRecords);
   white-space: nowrap;
 }
 
-.status-0 { background: rgba(102, 126, 234, 0.2); color: #667eea; }
-.status-1 { background: rgba(76, 175, 80, 0.18); color: #4caf50; }
-.status-2 { background: rgba(76, 175, 80, 0.12); color: #81c784; }
-.status-3 { background: rgba(244, 67, 54, 0.15); color: #f44336; }
-.status-4 { background: rgba(158, 158, 158, 0.18); color: #9e9e9e; }
+.status-0 {
+  background: rgba(102, 126, 234, 0.2);
+  color: #667eea;
+}
+.status-1 {
+  background: rgba(76, 175, 80, 0.18);
+  color: #4caf50;
+}
+.status-2 {
+  background: rgba(76, 175, 80, 0.12);
+  color: #81c784;
+}
+.status-3 {
+  background: rgba(244, 67, 54, 0.15);
+  color: #f44336;
+}
+.status-4 {
+  background: rgba(158, 158, 158, 0.18);
+  color: #9e9e9e;
+}
 
 .record-time {
   margin-top: 12px;
@@ -600,7 +630,11 @@ onMounted(fetchRecords);
 }
 
 @media (max-width: 768px) {
-  .records-page { padding: 16px; }
-  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .records-page {
+    padding: 16px;
+  }
+  .stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>

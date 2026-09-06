@@ -3,7 +3,7 @@
   <div v-if="visible" class="modal-overlay" @click.self="handleClose">
     <div class="modal-content">
       <button class="modal-close" @click="handleClose">✕</button>
-      
+
       <div class="modal-header">
         <div class="modal-icon">📚</div>
         <h2>图书馆预约系统</h2>
@@ -14,9 +14,9 @@
       <form @submit.prevent="handleLogin" class="login-form">
         <div class="form-group">
           <label>学号</label>
-          <input 
-            v-model="loginForm.username" 
-            type="text" 
+          <input
+            v-model="loginForm.username"
+            type="text"
             placeholder="请输入学号"
             required
             autocomplete="username"
@@ -29,9 +29,9 @@
         <div class="form-group">
           <label>密码</label>
           <div class="password-wrapper">
-            <input 
-              v-model="loginForm.password" 
-              :type="showPassword ? 'text' : 'password'" 
+            <input
+              v-model="loginForm.password"
+              :type="showPassword ? 'text' : 'password'"
               placeholder="请输入密码"
               required
               autocomplete="current-password"
@@ -45,9 +45,7 @@
           <span v-else class="input-hint">初始密码为身份证号后6位</span>
         </div>
 
-        <div v-if="errorMessage" class="error-message">
-          ⚠️ {{ errorMessage }}
-        </div>
+        <div v-if="errorMessage" class="error-message">⚠️ {{ errorMessage }}</div>
 
         <button type="submit" class="login-btn" :disabled="loading">
           {{ loading ? '登录中...' : '登 录' }}
@@ -63,27 +61,22 @@
         <form @submit.prevent="handleChangePassword" class="change-password-form">
           <div class="form-group">
             <label>当前密码</label>
-            <input 
-              v-model="changePwdForm.oldPassword" 
-              type="password" 
-              placeholder="请输入当前密码"
-              required
-            />
+            <input v-model="changePwdForm.oldPassword" type="password" placeholder="请输入当前密码" required />
           </div>
 
           <div class="form-group">
             <label>新密码</label>
-            <input 
-              v-model="changePwdForm.newPassword" 
-              type="password" 
+            <input
+              v-model="changePwdForm.newPassword"
+              type="password"
               placeholder="请输入新密码"
               required
               @input="checkPasswordStrength"
             />
             <div v-if="changePwdForm.newPassword" class="password-strength">
               <div class="strength-bar">
-                <div 
-                  class="strength-fill" 
+                <div
+                  class="strength-fill"
                   :class="passwordStrength.class"
                   :style="{ width: passwordStrength.percentage + '%' }"
                 ></div>
@@ -97,36 +90,21 @@
 
           <div class="form-group">
             <label>确认新密码</label>
-            <input 
-              v-model="changePwdForm.confirmPassword" 
-              type="password" 
-              placeholder="请再次输入新密码"
-              required
-            />
+            <input v-model="changePwdForm.confirmPassword" type="password" placeholder="请再次输入新密码" required />
           </div>
 
-          <div v-if="changePwdError" class="error-message">
-            ⚠️ {{ changePwdError }}
-          </div>
-          <div v-if="changePwdSuccess" class="success-message">
-            ✅ 密码修改成功！请重新登录
-          </div>
+          <div v-if="changePwdError" class="error-message">⚠️ {{ changePwdError }}</div>
+          <div v-if="changePwdSuccess" class="success-message">✅ 密码修改成功！请重新登录</div>
 
           <button type="submit" class="change-pwd-btn" :disabled="changePwdLoading">
             {{ changePwdLoading ? '修改中...' : '修改密码' }}
           </button>
-          <button type="button" class="cancel-change-btn" @click="cancelChangePassword">
-            取消
-          </button>
+          <button type="button" class="cancel-change-btn" @click="cancelChangePassword">取消</button>
         </form>
       </div>
 
       <div class="modal-footer">
-        <button 
-          v-if="!showChangePassword && isLoggedIn" 
-          class="change-pwd-link" 
-          @click="showChangePassword = true"
-        >
+        <button v-if="!showChangePassword && isLoggedIn" class="change-pwd-link" @click="showChangePassword = true">
           🔑 修改密码
         </button>
         <span class="footer-hint">首次登录请及时修改初始密码</span>
@@ -135,223 +113,227 @@
   </div>
 </template>
 
-<script setup>
-import { ref, watch, computed } from 'vue';
-import { login, logout, changePassword } from '@/api/user';
+<script setup lang="ts">
+import { login, changePassword } from '@/api/user'
+import { ref, watch, computed } from 'vue'
+import type { ApiErrorShape } from '@/types/api'
 
 const props = defineProps({
   visible: {
     type: Boolean,
     default: false
   }
-});
+})
 
-const emit = defineEmits(['update:visible', 'login-success']);
+const emit = defineEmits(['update:visible', 'login-success'])
 
 // 登录表单
 const loginForm = ref({
   username: '',
   password: ''
-});
+})
 
-const showPassword = ref(false);
-const loading = ref(false);
-const errorMessage = ref('');
-const isLoggedIn = ref(false);
+const showPassword = ref(false)
+const loading = ref(false)
+const errorMessage = ref('')
+const isLoggedIn = ref(false)
 
 // 表单验证
-const usernameError = ref('');
-const passwordError = ref('');
+const usernameError = ref('')
+const passwordError = ref('')
 
 const validateUsername = () => {
-  const username = loginForm.value.username.trim();
+  const username = loginForm.value.username.trim()
   if (!username) {
-    usernameError.value = '请输入学号';
+    usernameError.value = '请输入学号'
   } else if (!/^\d{6,12}$/.test(username)) {
-    usernameError.value = '学号应为6-12位数字';
+    usernameError.value = '学号应为6-12位数字'
   } else {
-    usernameError.value = '';
+    usernameError.value = ''
   }
-};
+}
 
 const validatePassword = () => {
-  const password = loginForm.value.password;
+  const password = loginForm.value.password
   if (!password) {
-    passwordError.value = '请输入密码';
+    passwordError.value = '请输入密码'
   } else if (password.length < 6) {
-    passwordError.value = '密码长度不能少于6位';
+    passwordError.value = '密码长度不能少于6位'
   } else {
-    passwordError.value = '';
+    passwordError.value = ''
   }
-};
+}
 
 // 修改密码
-const showChangePassword = ref(false);
+const showChangePassword = ref(false)
 const changePwdForm = ref({
   oldPassword: '',
   newPassword: '',
   confirmPassword: ''
-});
-const changePwdLoading = ref(false);
-const changePwdError = ref('');
-const changePwdSuccess = ref(false);
+})
+const changePwdLoading = ref(false)
+const changePwdError = ref('')
+const changePwdSuccess = ref(false)
 
 // 密码强度检测
 const checkPasswordStrength = () => {
-  const pwd = changePwdForm.value.newPassword;
-  if (!pwd) return 0;
-  
-  let score = 0;
-  if (pwd.length >= 8) score += 1;
-  if (pwd.length >= 12) score += 1;
-  if (/[a-z]/.test(pwd) && /[A-Z]/.test(pwd)) score += 1;
-  if (/\d/.test(pwd)) score += 1;
-  if (/[^a-zA-Z0-9]/.test(pwd)) score += 1;
-  
-  return score;
-};
+  const pwd = changePwdForm.value.newPassword
+  if (!pwd) return 0
+
+  let score = 0
+  if (pwd.length >= 8) score += 1
+  if (pwd.length >= 12) score += 1
+  if (/[a-z]/.test(pwd) && /[A-Z]/.test(pwd)) score += 1
+  if (/\d/.test(pwd)) score += 1
+  if (/[^a-zA-Z0-9]/.test(pwd)) score += 1
+
+  return score
+}
 
 const passwordStrength = computed(() => {
-  const score = checkPasswordStrength();
-  if (!score) return { class: '', text: '', percentage: 0, isWeak: false };
-  
+  const score = checkPasswordStrength()
+  if (!score) return { class: '', text: '', percentage: 0, isWeak: false }
+
   if (score <= 2) {
-    return { class: 'weak', text: '弱', percentage: 30, isWeak: true };
+    return { class: 'weak', text: '弱', percentage: 30, isWeak: true }
   } else if (score <= 3) {
-    return { class: 'medium', text: '中', percentage: 60, isWeak: true };
+    return { class: 'medium', text: '中', percentage: 60, isWeak: true }
   } else {
-    return { class: 'strong', text: '强', percentage: 100, isWeak: false };
+    return { class: 'strong', text: '强', percentage: 100, isWeak: false }
   }
-});
+})
 
 // 登录处理
 const handleLogin = async () => {
-  errorMessage.value = '';
-  
+  errorMessage.value = ''
+
   // 前端验证
-  validateUsername();
-  validatePassword();
+  validateUsername()
+  validatePassword()
   if (usernameError.value || passwordError.value) {
-    return;
+    return
   }
-  
-  loading.value = true;
-  
+
+  loading.value = true
+
   try {
     const res = await login({
       username: loginForm.value.username.trim(),
       password: loginForm.value.password
-    });
-    
+    })
+
     if (res.code === 200) {
-      isLoggedIn.value = true;
-      emit('login-success', res.data);
+      isLoggedIn.value = true
+      emit('login-success', res.data)
       // 检查是否需要修改密码（首次登录或密码过于简单）
       if (res.data.needChangePassword || res.data.isFirstLogin) {
-        showChangePassword.value = true;
+        showChangePassword.value = true
       } else {
         // 不需要修改密码，直接关闭弹窗
-        emit('update:visible', false);
+        emit('update:visible', false)
       }
     } else {
-      errorMessage.value = res.message || '登录失败，请检查学号和密码';
+      errorMessage.value = res.message || '登录失败，请检查学号和密码'
     }
   } catch (err) {
-    errorMessage.value = err.message || '网络错误，请重试';
+    errorMessage.value = (err as ApiErrorShape).message || '网络错误，请重试'
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 修改密码处理
 const handleChangePassword = async () => {
-  changePwdError.value = '';
-  changePwdSuccess.value = false;
-  
+  changePwdError.value = ''
+  changePwdSuccess.value = false
+
   // 前端验证
   if (!changePwdForm.value.oldPassword) {
-    changePwdError.value = '请输入当前密码';
-    return;
+    changePwdError.value = '请输入当前密码'
+    return
   }
-  
+
   if (changePwdForm.value.newPassword !== changePwdForm.value.confirmPassword) {
-    changePwdError.value = '两次输入的密码不一致';
-    return;
+    changePwdError.value = '两次输入的密码不一致'
+    return
   }
-  
+
   if (changePwdForm.value.newPassword.length < 6) {
-    changePwdError.value = '密码长度不能少于6位';
-    return;
+    changePwdError.value = '密码长度不能少于6位'
+    return
   }
-  
+
   // 检查密码强度
   if (passwordStrength.value.isWeak) {
     if (!confirm('密码过于简单，是否继续使用？建议使用包含大小写字母、数字和特殊字符的密码。')) {
-      return;
+      return
     }
   }
-  
-  changePwdLoading.value = true;
-  
+
+  changePwdLoading.value = true
+
   try {
     const res = await changePassword({
       oldPassword: changePwdForm.value.oldPassword,
       newPassword: changePwdForm.value.newPassword,
       confirmPassword: changePwdForm.value.confirmPassword
-    });
-    
+    })
+
     if (res.code === 200) {
-      changePwdSuccess.value = true;
+      changePwdSuccess.value = true
       // 修改密码成功后，提示用户重新登录
       setTimeout(() => {
         // 清除登录状态和 token
-        localStorage.removeItem('token');
-        localStorage.removeItem('userInfo');
-        isLoggedIn.value = false;
-        showChangePassword.value = false;
-        changePwdForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' };
-        changePwdSuccess.value = false;
+        localStorage.removeItem('token')
+        localStorage.removeItem('userInfo')
+        isLoggedIn.value = false
+        showChangePassword.value = false
+        changePwdForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+        changePwdSuccess.value = false
         // 关闭弹窗
-        emit('update:visible', false);
+        emit('update:visible', false)
         // 触发未授权事件，让父组件清除用户信息
-        window.dispatchEvent(new CustomEvent('unauthorized'));
-      }, 2000);
+        window.dispatchEvent(new CustomEvent('unauthorized'))
+      }, 2000)
     } else {
-      changePwdError.value = res.message || '修改密码失败';
+      changePwdError.value = res.message || '修改密码失败'
     }
   } catch (err) {
-    changePwdError.value = err.message || '网络错误，请重试';
+    changePwdError.value = (err as ApiErrorShape).message || '网络错误，请重试'
   } finally {
-    changePwdLoading.value = false;
+    changePwdLoading.value = false
   }
-};
+}
 
 // 取消修改密码
 const cancelChangePassword = () => {
-  showChangePassword.value = false;
-  changePwdForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' };
-  changePwdError.value = '';
-  changePwdSuccess.value = false;
-};
+  showChangePassword.value = false
+  changePwdForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+  changePwdError.value = ''
+  changePwdSuccess.value = false
+}
 
 // 关闭弹窗
 const handleClose = () => {
-  emit('update:visible', false);
-};
+  emit('update:visible', false)
+}
 
 // 重置表单
-watch(() => props.visible, (newVal) => {
-  if (!newVal) {
-    loginForm.value = { username: '', password: '' };
-    errorMessage.value = '';
-    usernameError.value = '';
-    passwordError.value = '';
-    changePwdForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' };
-    changePwdError.value = '';
-    changePwdSuccess.value = false;
-    showChangePassword.value = false;
+watch(
+  () => props.visible,
+  (newVal) => {
+    if (!newVal) {
+      loginForm.value = { username: '', password: '' }
+      errorMessage.value = ''
+      usernameError.value = ''
+      passwordError.value = ''
+      changePwdForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+      changePwdError.value = ''
+      changePwdSuccess.value = false
+      showChangePassword.value = false
+    }
   }
-});
+)
 </script>
 
 <style scoped>
@@ -372,8 +354,12 @@ watch(() => props.visible, (newVal) => {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* --- 弹窗内容 --- */
@@ -564,7 +550,7 @@ watch(() => props.visible, (newVal) => {
 .strength-bar {
   width: 100%;
   height: 4px;
-  background: var(--border-color, rgba(255,255,255,0.1));
+  background: var(--border-color, rgba(255, 255, 255, 0.1));
   border-radius: 2px;
   overflow: hidden;
 }
@@ -589,7 +575,7 @@ watch(() => props.visible, (newVal) => {
 
 .strength-text {
   font-size: 12px;
-  color: var(--text-secondary, rgba(255,255,255,0.6));
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
   margin-top: 2px;
   display: inline-block;
 }
@@ -615,13 +601,13 @@ watch(() => props.visible, (newVal) => {
 .change-password-section {
   margin-top: 20px;
   padding-top: 20px;
-  border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
 }
 
 .divider {
   text-align: center;
   margin-bottom: 16px;
-  color: var(--text-secondary, rgba(255,255,255,0.6));
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
   font-size: 14px;
 }
 
@@ -657,10 +643,10 @@ watch(() => props.visible, (newVal) => {
 .cancel-change-btn {
   width: 100%;
   padding: 10px;
-  border: 1px solid var(--border-color, rgba(255,255,255,0.2));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
   border-radius: 8px;
   background: transparent;
-  color: var(--text-secondary, rgba(255,255,255,0.6));
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;
@@ -668,7 +654,7 @@ watch(() => props.visible, (newVal) => {
 }
 
 .cancel-change-btn:hover {
-  background: var(--sidebar-hover, rgba(255,255,255,0.06));
+  background: var(--sidebar-hover, rgba(255, 255, 255, 0.06));
 }
 
 .success-message {
@@ -687,7 +673,7 @@ watch(() => props.visible, (newVal) => {
   justify-content: space-between;
   margin-top: 20px;
   padding-top: 16px;
-  border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
 }
 
 .change-pwd-link {
@@ -705,7 +691,7 @@ watch(() => props.visible, (newVal) => {
 
 .footer-hint {
   font-size: 12px;
-  color: var(--text-secondary, rgba(255,255,255,0.4));
+  color: var(--text-secondary, rgba(255, 255, 255, 0.4));
 }
 
 /* --- 响应式 --- */
@@ -713,7 +699,7 @@ watch(() => props.visible, (newVal) => {
   .modal-content {
     padding: 24px 20px;
   }
-  
+
   .modal-header h2 {
     font-size: 18px;
   }

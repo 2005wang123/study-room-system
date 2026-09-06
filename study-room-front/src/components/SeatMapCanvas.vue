@@ -1,41 +1,40 @@
 <template>
-  <div class="seat-map-canvas">
-    <svg
-      :viewBox="`0 0 ${cw} ${ch}`"
-      class="map-svg"
-      xmlns="http://www.w3.org/2000/svg"
-    >
+  <div ref="wrapEl" class="seat-map-canvas">
+    <svg :viewBox="`0 0 ${cw} ${ch}`" class="map-svg" xmlns="http://www.w3.org/2000/svg">
       <!-- 底图 -->
       <image
         v-if="layout?.canvas?.bgImage"
         :href="layout.canvas.bgImage"
-        x="0" y="0"
-        :width="cw" :height="ch"
+        x="0"
+        y="0"
+        :width="cw"
+        :height="ch"
         preserveAspectRatio="xMidYMid meet"
       />
 
       <!-- 区域 -->
       <g v-for="a in areas" :key="a.id" class="map-area">
         <rect
-          :x="a.x" :y="a.y" :width="a.w" :height="a.h"
-          :fill="a.fill || 'rgba(102,126,234,0.30)'"
+          :x="a.x"
+          :y="a.y"
+          :width="a.w"
+          :height="a.h"
+          :fill="a.fill || 'rgba(102,126,234,0.22)'"
           :stroke="a.stroke || '#667eea'"
           stroke-width="2"
           rx="8"
         />
-        <text
-          v-if="a.name"
-          :x="a.x + a.w / 2" :y="a.y + 24"
-          class="area-name"
-          text-anchor="middle"
-        >{{ a.name }}</text>
+        <text v-if="a.name" :x="a.x + 10" :y="a.y + 24" class="area-name">{{ a.name }}</text>
       </g>
 
       <!-- 墙体 -->
       <line
         v-for="w in walls"
         :key="w.id"
-        :x1="w.x1" :y1="w.y1" :x2="w.x2" :y2="w.y2"
+        :x1="w.x1"
+        :y1="w.y1"
+        :x2="w.x2"
+        :y2="w.y2"
         :stroke="w.color || '#8a8a96'"
         :stroke-width="w.thickness || 8"
         stroke-linecap="round"
@@ -59,11 +58,14 @@
       <text
         v-for="t in texts"
         :key="t.id"
-        :x="t.x" :y="t.y"
+        :x="t.x"
+        :y="t.y"
         :font-size="t.fontSize || 24"
         :fill="t.color || '#e8e8ec'"
         class="map-text"
-      >{{ t.content }}</text>
+      >
+        {{ t.content }}
+      </text>
 
       <!-- 座位 -->
       <g
@@ -72,11 +74,14 @@
         class="map-seat"
         :transform="`translate(${s.x + (s.w || 44) / 2} ${s.y + (s.h || 44) / 2}) rotate(${s.rotation || 0})`"
         @click="onSeatClick(s)"
+        @mouseenter="onSeatEnter(s, $event)"
+        @mouseleave="tip.visible = false"
       >
-        <title>{{ seatTitle(s) }}</title>
         <rect
-          :x="-(s.w || 44) / 2" :y="-(s.h || 44) / 2"
-          :width="s.w || 44" :height="s.h || 44"
+          :x="-(s.w || 44) / 2"
+          :y="-(s.h || 44) / 2"
+          :width="s.w || 44"
+          :height="s.h || 44"
           :fill="seatFill(s)"
           stroke="#d8d8e0"
           stroke-width="1.5"
@@ -84,96 +89,159 @@
           class="seat-rect"
         />
         <text
-          :x="0" :y="0"
+          :x="0"
+          :y="0"
           text-anchor="middle"
           dominant-baseline="central"
           class="seat-no"
           :font-size="Math.max(10, Math.min(14, (s.w || 44) / 4))"
-        >{{ s.seatNo }}</text>
-        <circle
-          v-if="seatData(s)?.myReservationId"
-          cx="0" cy="0"
-          r="3"
-          fill="#ffffff"
-          opacity="0.9"
-        />
+        >
+          {{ s.seatNo }}
+        </text>
+        <circle v-if="seatData(s)?.myReservationId" cx="0" cy="0" r="3" fill="#ffffff" opacity="0.9" />
       </g>
     </svg>
 
     <div v-if="!layout" class="map-empty">该楼层暂无结构图，请管理员在「楼层绘图」中绘制并发布</div>
+
+    <!-- 座位悬浮提示 -->
+    <div
+      v-if="tip.visible"
+      class="map-tip"
+      :class="{ below: tip.below }"
+      :style="{ left: tip.left + 'px', top: tip.top + 'px' }"
+    >
+      <div class="map-tip-title">{{ tip.text }}</div>
+      <div class="map-tip-sub">{{ tip.hint }}</div>
+    </div>
   </div>
 </template>
 
-<script setup>
-import { computed } from 'vue';
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import type { LayoutSeatShape, LayoutShape } from '@/types/layout'
 
-const props = defineProps({
-  layout: { type: Object, default: null },
-  // 座位实时状态（来自现有 getSeats 接口）
-  seats: { type: Array, default: () => [] }
-});
-const emit = defineEmits(['seat-click']);
+/** getSeats 返回的座位实时状态（字段较宽松，兼容历史数据） */
+interface SeatStatusLike {
+  id?: number | string
+  seatId?: number | string
+  seat_id?: number | string
+  seat_no?: number | string
+  seatNo?: string
+  status?: number | string
+  bookedRatio?: number | null
+  userName?: string
+  myReservationId?: number | string | null
+}
 
-const cw = computed(() => Number(props.layout?.canvas?.width) || 1600);
-const ch = computed(() => Number(props.layout?.canvas?.height) || 1100);
-const areas = computed(() => props.layout?.areas || []);
-const walls = computed(() => props.layout?.walls || []);
-const paths = computed(() => props.layout?.paths || []);
-const texts = computed(() => props.layout?.texts || []);
-const seats = computed(() => props.layout?.seats || []);
+const props = withDefaults(
+  defineProps<{
+    layout: LayoutShape | null
+    // 座位实时状态（来自现有 getSeats 接口）
+    seats: SeatStatusLike[]
+  }>(),
+  { layout: null, seats: () => [] }
+)
+const emit = defineEmits<{ (e: 'seat-click', data: SeatStatusLike): void }>()
+
+const cw = computed(() => Number(props.layout?.canvas?.width) || 1600)
+const ch = computed(() => Number(props.layout?.canvas?.height) || 1100)
+const areas = computed(() => props.layout?.areas || [])
+const walls = computed(() => props.layout?.walls || [])
+const paths = computed(() => props.layout?.paths || [])
+const texts = computed(() => props.layout?.texts || [])
+const seats = computed(() => props.layout?.seats || [])
 
 const seatDataMap = computed(() => {
-  const map = new Map();
-  (props.seats || []).forEach(s => {
-    const id = s.id ?? s.seatId ?? s.seat_id;
-    if (id != null) map.set(String(id), s);
-  });
-  return map;
-});
+  const map = new Map<string, SeatStatusLike>()
+  props.seats.forEach((s) => {
+    const id = s.id ?? s.seatId ?? s.seat_id
+    if (id != null) map.set(String(id), s)
+  })
+  return map
+})
 
-const seatData = (s) => seatDataMap.value.get(String(s.seatId));
+const seatData = (s: LayoutSeatShape): SeatStatusLike | undefined => seatDataMap.value.get(String(s.seatId))
 
-const seatRatio = (s) => {
-  const r = Number(s?.bookedRatio);
-  return Number.isFinite(r) ? r : 0;
-};
+const seatRatio = (s: SeatStatusLike | undefined): number => {
+  const r = Number(s?.bookedRatio)
+  return Number.isFinite(r) ? r : 0
+}
 
-const seatFill = (s) => {
-  const data = seatData(s);
-  if (data && Number(data.status) === 3) return '#9e9e9e';
-  const r = seatRatio(data);
-  if (r <= 0) return '#4caf50';
-  if (r >= 1) return '#f44336';
-  return '#f5a623';
-};
+const seatFill = (s: LayoutSeatShape): string => {
+  const data = seatData(s)
+  if (data && Number(data.status) === 3) return '#7a7a85'
+  const r = seatRatio(data)
+  if (r <= 0) return '#4caf50'
+  if (r >= 1) return '#f44336'
+  return '#f5a623'
+}
 
-const seatTitle = (s) => {
-  const data = seatData(s);
-  if (!data) return `${s.seatNo}（未同步数据）`;
-  if (Number(data.status) === 3) return `${s.seatNo} · 维修中`;
-  const r = seatRatio(data);
-  const state = r <= 0 ? '空闲' : r >= 1 ? '已约满' : '部分可约';
-  const user = data.userName ? ` · ${data.userName}` : '';
-  const mine = data.myReservationId ? ' · 我的预约' : '';
-  return `${s.seatNo} · ${state}${user}${mine}`;
-};
+const seatTitle = (s: LayoutSeatShape): string => {
+  const data = seatData(s)
+  if (!data) return `${s.seatNo}（未同步数据）`
+  if (Number(data.status) === 3) return `${s.seatNo} · 维修中`
+  const r = seatRatio(data)
+  const state = r <= 0 ? '空闲' : r >= 1 ? '已约满' : '部分可约'
+  const user = data.userName ? ` · ${data.userName}` : ''
+  const mine = data.myReservationId ? ' · 我的预约' : ''
+  return `${s.seatNo} · ${state}${user}${mine}`
+}
+const wrapEl = ref<HTMLDivElement | null>(null)
+const tip = ref<{
+  visible: boolean
+  text: string
+  hint: string
+  left: number
+  top: number
+  below: boolean
+}>({ visible: false, text: '', hint: '', left: 0, top: 0, below: false })
 
-const onSeatClick = (s) => {
-  const data = seatData(s) || { id: s.seatId, seat_no: s.seatNo, seatNo: s.seatNo, status: s.status ?? 0 };
-  emit('seat-click', data);
-};
+const seatHint = (s: LayoutSeatShape): string => {
+  const data = seatData(s)
+  if (!data) return '该座位尚未与座位表同步，请联系管理员发布'
+  if (Number(data.status) === 3) return '维修中，暂不可预约'
+  if (data.myReservationId) return '你已预约该座位，点击可查看/操作'
+  const r = seatRatio(data)
+  if (r >= 1) return '今日已约满'
+  return '点击可预约该座位'
+}
 
-const pointsToStr = (points) => {
-  return (points || []).map(p => p.join(',')).join(' ');
-};
+function onSeatEnter(s: LayoutSeatShape, e: MouseEvent): void {
+  const wrap = wrapEl.value
+  const g = e.currentTarget as SVGGraphicsElement | null
+  if (!wrap || !g) return
+  const wr = wrap.getBoundingClientRect()
+  const sr = g.getBoundingClientRect()
+  const centerX = sr.left - wr.left + sr.width / 2
+  const below = sr.top - wr.top < 74
+  tip.value = {
+    visible: true,
+    text: seatTitle(s),
+    hint: seatHint(s),
+    left: Math.min(Math.max(centerX, 84), Math.max(84, wrap.clientWidth - 84)),
+    top: below ? sr.bottom - wr.top + 8 : sr.top - wr.top - 8,
+    below
+  }
+}
+
+const onSeatClick = (s: LayoutSeatShape) => {
+  const data = seatData(s) ?? { id: s.seatId, seat_no: s.seatNo, seatNo: s.seatNo, status: s.status ?? 0 }
+  emit('seat-click', data)
+}
+
+const pointsToStr = (points?: number[][]): string => {
+  return (points || []).map((p) => p.join(',')).join(' ')
+}
 </script>
 
 <style scoped>
 .seat-map-canvas {
+  position: relative;
   width: 100%;
   overflow-x: auto;
   background: var(--bg-primary, #0d0d12);
-  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
   border-radius: 12px;
   padding: 12px;
   box-sizing: border-box;
@@ -187,14 +255,20 @@ const pointsToStr = (points) => {
   min-width: 600px;
 }
 .map-area .area-name {
-  fill: var(--text-secondary, #9a9aa5);
+  fill: rgba(255, 255, 255, 0.6);
   font-size: 18px;
   font-weight: 600;
+  pointer-events: none;
+  user-select: none;
 }
-.map-seat { cursor: pointer; }
+.map-seat {
+  cursor: pointer;
+}
 .map-seat .seat-rect {
-  transition: filter 0.15s, stroke 0.15s;
-  stroke: var(--border-color, rgba(255,255,255,0.25));
+  transition:
+    filter 0.15s,
+    stroke 0.15s;
+  stroke: var(--border-color, rgba(255, 255, 255, 0.25));
 }
 .map-seat:hover .seat-rect {
   filter: brightness(1.25);
@@ -214,3 +288,9 @@ const pointsToStr = (points) => {
   padding: 48px 0;
 }
 </style>
+
+/* 座位悬浮提示 */ .map-tip { position: absolute; z-index: 30; max-width: 260px; padding: 7px 10px; border-radius: 8px;
+background: rgba(24, 24, 32, 0.96); border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 8px 22px rgba(0, 0, 0,
+0.45); transform: translate(-50%, -100%); pointer-events: none; text-align: left; } .map-tip.below { transform:
+translate(-50%, 0); } .map-tip-title { font-size: 12px; font-weight: 600; color: #fff; line-height: 1.4; } .map-tip-sub
+{ margin-top: 3px; font-size: 11px; color: #a9a9b8; line-height: 1.4; }

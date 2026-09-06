@@ -17,6 +17,10 @@
         <div class="user-card-tags">
           <span class="tag">{{ roleText }}</span>
           <span class="tag" :class="profile.status === 1 ? 'tag-ok' : 'tag-bad'">{{ statusText }}</span>
+          <span class="tag tag-points">💎 信用积分：{{ profile.points ?? '-' }}</span>
+          <span v-if="isPointBanned" class="tag tag-ban"
+            >🚫 积分为0，禁约至 {{ formatBanTime(profile.bookBanUntil) }}，期间无法预约</span
+          >
           <span v-if="profile.isFirstLogin" class="tag tag-warn">首次登录</span>
         </div>
         <div class="user-card-id">学号 / 账号：{{ profile.username || '-' }}</div>
@@ -52,31 +56,55 @@
         <div class="form-group">
           <label>当前密码</label>
           <div class="password-wrapper">
-            <input v-model="pwdForm.oldPassword" :type="showPwd.old ? 'text' : 'password'" placeholder="请输入当前密码" required />
-            <button type="button" class="password-toggle" @click="showPwd.old = !showPwd.old">{{ showPwd.old ? '🙈' : '👁️' }}</button>
+            <input
+              v-model="pwdForm.oldPassword"
+              :type="showPwd.old ? 'text' : 'password'"
+              placeholder="请输入当前密码"
+              required
+            />
+            <button type="button" class="password-toggle" @click="showPwd.old = !showPwd.old">
+              {{ showPwd.old ? '🙈' : '👁️' }}
+            </button>
           </div>
         </div>
 
         <div class="form-group">
           <label>新密码</label>
           <div class="password-wrapper">
-            <input v-model="pwdForm.newPassword" :type="showPwd.new ? 'text' : 'password'" placeholder="请输入新密码" required @input="checkStrength" />
-            <button type="button" class="password-toggle" @click="showPwd.new = !showPwd.new">{{ showPwd.new ? '🙈' : '👁️' }}</button>
+            <input
+              v-model="pwdForm.newPassword"
+              :type="showPwd.new ? 'text' : 'password'"
+              placeholder="请输入新密码"
+              required
+              @input="checkStrength"
+            />
+            <button type="button" class="password-toggle" @click="showPwd.new = !showPwd.new">
+              {{ showPwd.new ? '🙈' : '👁️' }}
+            </button>
           </div>
           <div v-if="pwdForm.newPassword" class="password-strength">
             <div class="strength-bar">
               <div class="strength-fill" :class="strength.class" :style="{ width: strength.percentage + '%' }"></div>
             </div>
             <span class="strength-text">{{ strength.text }}</span>
-            <span v-if="strength.isWeak" class="strength-warning">⚠️ 密码过于简单，建议包含大小写字母、数字和特殊字符</span>
+            <span v-if="strength.isWeak" class="strength-warning"
+              >⚠️ 密码过于简单，建议包含大小写字母、数字和特殊字符</span
+            >
           </div>
         </div>
 
         <div class="form-group">
           <label>确认新密码</label>
           <div class="password-wrapper">
-            <input v-model="pwdForm.confirmPassword" :type="showPwd.confirm ? 'text' : 'password'" placeholder="请再次输入新密码" required />
-            <button type="button" class="password-toggle" @click="showPwd.confirm = !showPwd.confirm">{{ showPwd.confirm ? '🙈' : '👁️' }}</button>
+            <input
+              v-model="pwdForm.confirmPassword"
+              :type="showPwd.confirm ? 'text' : 'password'"
+              placeholder="请再次输入新密码"
+              required
+            />
+            <button type="button" class="password-toggle" @click="showPwd.confirm = !showPwd.confirm">
+              {{ showPwd.confirm ? '🙈' : '👁️' }}
+            </button>
           </div>
           <span v-if="pwdError" class="field-error">{{ pwdError }}</span>
         </div>
@@ -108,151 +136,174 @@
   </div>
 </template>
 
-<script setup>
-import { ref, reactive, computed, onMounted } from 'vue';
-import { getUserInfo, changePassword } from '@/api/user';
-import { getMyReservations } from '@/api/seat';
+<script setup lang="ts">
+import { ref, reactive, computed, onMounted } from 'vue'
+import { getUserInfo, changePassword } from '@/api/user'
+import { getMyReservations } from '@/api/seat'
+import type { ApiErrorShape, ReservationVO, UserInfo } from '@/types/api'
 
-const emit = defineEmits(['toast', 'logout', 'switch-account']);
+const emit = defineEmits<{
+  (e: 'toast', payload: { message: string; type: 'success' | 'error' | 'info' | 'warning' }): void
+  (e: 'logout'): void
+  (e: 'switch-account'): void
+}>()
 
 const profile = reactive({
   username: '',
   role: 0,
   status: 1,
   isFirstLogin: false,
+  points: null as number | null,
+  bookBanUntil: null as string | null,
   avatar: ''
-});
+})
 
-const records = ref([]);
-const loaded = ref(false);
+const records = ref<ReservationVO[]>([])
+const loaded = ref(false)
 
 const pwdForm = reactive({
   oldPassword: '',
   newPassword: '',
   confirmPassword: ''
-});
-const showPwd = reactive({ old: false, new: false, confirm: false });
-const pwdLoading = ref(false);
-const pwdError = ref('');
+})
+const showPwd = reactive({ old: false, new: false, confirm: false })
+const pwdLoading = ref(false)
+const pwdError = ref('')
 
-const roleText = computed(() => profile.role === 1 ? '管理员' : '学生');
-const statusText = computed(() => profile.status === 1 ? '账号正常' : '账号已禁用');
-const totalCount = computed(() => records.value.length);
-const activeCount = computed(() => records.value.filter(r => Number(r.status) === 0 || Number(r.status) === 1).length);
-const completedCount = computed(() => records.value.filter(r => Number(r.status) === 2).length);
-const cancelledCount = computed(() => records.value.filter(r => Number(r.status) === 4).length);
+const roleText = computed(() => (profile.role === 1 ? '管理员' : '学生'))
+const statusText = computed(() => (profile.status === 1 ? '账号正常' : '账号已禁用'))
+const totalCount = computed(() => records.value.length)
+const activeCount = computed(() => records.value.filter((r) => Number(r.status) === 0 || Number(r.status) === 1).length)
+const completedCount = computed(() => records.value.filter((r) => Number(r.status) === 2).length)
+const cancelledCount = computed(() => records.value.filter((r) => Number(r.status) === 4).length)
+const isPointBanned = computed(() => {
+  if (!profile.bookBanUntil) return false
+  return new Date(profile.bookBanUntil).getTime() > Date.now()
+})
+const formatBanTime = (t?: string | null): string => {
+  if (!t) return '-'
+  const s = String(t).replace('T', ' ')
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2})/)
+  return m ? `${m[1]} ${m[2]}` : s
+}
 
 // 密码强度
-const checkStrength = () => {
-  const pwd = pwdForm.newPassword;
-  if (!pwd) return 0;
-  let score = 0;
-  if (pwd.length >= 8) score += 1;
-  if (pwd.length >= 12) score += 1;
-  if (/[a-z]/.test(pwd) && /[A-Z]/.test(pwd)) score += 1;
-  if (/\d/.test(pwd)) score += 1;
-  if (/[^a-zA-Z0-9]/.test(pwd)) score += 1;
-  return score;
-};
+const checkStrength = (): number => {
+  const pwd = pwdForm.newPassword
+  if (!pwd) return 0
+  let score = 0
+  if (pwd.length >= 8) score += 1
+  if (pwd.length >= 12) score += 1
+  if (/[a-z]/.test(pwd) && /[A-Z]/.test(pwd)) score += 1
+  if (/\d/.test(pwd)) score += 1
+  if (/[^a-zA-Z0-9]/.test(pwd)) score += 1
+  return score
+}
 
 const strength = computed(() => {
-  const score = checkStrength();
-  if (!score) return { class: '', text: '', percentage: 0, isWeak: false };
-  if (score <= 2) return { class: 'weak', text: '弱', percentage: 30, isWeak: true };
-  if (score <= 3) return { class: 'medium', text: '中', percentage: 60, isWeak: true };
-  return { class: 'strong', text: '强', percentage: 100, isWeak: false };
-});
+  const score = checkStrength()
+  if (!score) return { class: '', text: '', percentage: 0, isWeak: false }
+  if (score <= 2) return { class: 'weak', text: '弱', percentage: 30, isWeak: true }
+  if (score <= 3) return { class: 'medium', text: '中', percentage: 60, isWeak: true }
+  return { class: 'strong', text: '强', percentage: 100, isWeak: false }
+})
 
-const extractList = (data) => {
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.rows)) return data.rows;
-  if (Array.isArray(data?.list)) return data.list;
-  if (Array.isArray(data?.records)) return data.records;
-  return [];
-};
+const extractList = (data: unknown): ReservationVO[] => {
+  if (Array.isArray(data)) return data
+  const d = data as { rows?: ReservationVO[]; list?: ReservationVO[]; records?: ReservationVO[] } | null
+  if (Array.isArray(d?.rows)) return d!.rows!
+  if (Array.isArray(d?.list)) return d!.list!
+  if (Array.isArray(d?.records)) return d!.records!
+  return []
+}
 
 const fetchProfile = async () => {
   try {
-    const res = await getUserInfo();
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    else if (data?.data?.code === 200) data = data.data.data;
-    if (data) {
-      profile.username = data.username || profile.username;
-      profile.role = data.role ?? profile.role;
-      profile.status = data.status ?? profile.status;
-      profile.isFirstLogin = !!data.isFirstLogin;
+    const res = await getUserInfo()
+    let data: unknown = res
+    if ((data as { code?: number })?.code === 200) data = (data as { data: UserInfo }).data
+    else if ((data as { data?: { code?: number } })?.data?.code === 200)
+      data = (data as { data: { data: UserInfo } }).data.data
+    const info = data as UserInfo | null
+    if (info) {
+      profile.username = info.username || profile.username
+      profile.role = info.role ?? profile.role
+      profile.status = info.status ?? profile.status
+      profile.isFirstLogin = !!info.isFirstLogin
+      profile.points = info.points ?? profile.points
+      profile.bookBanUntil = info.bookBanUntil || profile.bookBanUntil
     }
   } catch (err) {
     // 忽略：父组件会处理未授权
-    console.error('获取用户信息失败', err);
+    console.error('获取用户信息失败', err)
   }
-};
+}
 
 const fetchRecords = async () => {
   try {
-    const res = await getMyReservations();
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    else if (data?.data?.code === 200) data = data.data.data;
-    records.value = extractList(data);
-    loaded.value = true;
+    const res = await getMyReservations()
+    let data: unknown = res
+    if ((data as { code?: number })?.code === 200) data = (data as { data: unknown }).data
+    else if ((data as { data?: { code?: number } })?.data?.code === 200)
+      data = (data as { data: { data: unknown } }).data.data
+    records.value = extractList(data)
+    loaded.value = true
   } catch (err) {
-    console.error('获取预约统计失败', err);
-    loaded.value = true;
+    console.error('获取预约统计失败', err)
+    loaded.value = true
   }
-};
+}
 
 const handleChangePassword = async () => {
-  pwdError.value = '';
+  pwdError.value = ''
   if (!pwdForm.oldPassword || !pwdForm.newPassword || !pwdForm.confirmPassword) {
-    pwdError.value = '请填写完整的密码信息';
-    return;
+    pwdError.value = '请填写完整的密码信息'
+    return
   }
   if (pwdForm.newPassword !== pwdForm.confirmPassword) {
-    pwdError.value = '两次输入的新密码不一致';
-    return;
+    pwdError.value = '两次输入的新密码不一致'
+    return
   }
   if (pwdForm.newPassword.length < 8) {
-    pwdError.value = '新密码长度不能少于8位';
-    return;
+    pwdError.value = '新密码长度不能少于8位'
+    return
   }
   if (pwdForm.newPassword === pwdForm.oldPassword) {
-    pwdError.value = '新密码不能与当前密码相同';
-    return;
+    pwdError.value = '新密码不能与当前密码相同'
+    return
   }
 
-  pwdLoading.value = true;
+  pwdLoading.value = true
   try {
     await changePassword({
       oldPassword: pwdForm.oldPassword,
       newPassword: pwdForm.newPassword,
       confirmPassword: pwdForm.confirmPassword
-    });
-    emit('toast', { message: '✅ 密码修改成功', type: 'success' });
-    pwdForm.oldPassword = '';
-    pwdForm.newPassword = '';
-    pwdForm.confirmPassword = '';
+    })
+    emit('toast', { message: '✅ 密码修改成功', type: 'success' })
+    pwdForm.oldPassword = ''
+    pwdForm.newPassword = ''
+    pwdForm.confirmPassword = ''
   } catch (err) {
-    const msg = err.response?.data?.message || err.message || '修改密码失败';
-    pwdError.value = msg;
+    const e = err as ApiErrorShape
+    pwdError.value = e.response?.data?.message || e.message || '修改密码失败'
   } finally {
-    pwdLoading.value = false;
+    pwdLoading.value = false
   }
-};
+}
 
 const handleLogout = () => {
-  emit('logout');
-};
+  emit('logout')
+}
 
 const handleSwitchAccount = () => {
-  emit('switch-account');
-};
+  emit('switch-account')
+}
 
 onMounted(() => {
-  fetchProfile();
-  fetchRecords();
-});
+  fetchProfile()
+  fetchRecords()
+})
 </script>
 
 <style scoped>
@@ -339,9 +390,26 @@ onMounted(() => {
   color: var(--text-secondary);
 }
 
-.tag-ok { background: rgba(76, 175, 80, 0.15); color: #4caf50; }
-.tag-bad { background: rgba(244, 67, 54, 0.15); color: #f44336; }
-.tag-warn { background: rgba(255, 152, 0, 0.15); color: #ff9800; }
+.tag-ok {
+  background: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+}
+.tag-bad {
+  background: rgba(244, 67, 54, 0.15);
+  color: #f44336;
+}
+.tag-warn {
+  background: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+}
+.tag-points {
+  background: rgba(255, 193, 7, 0.16);
+  color: #b8860b;
+}
+.tag-ban {
+  background: rgba(244, 67, 54, 0.16);
+  color: #f44336;
+}
 
 .user-card-id {
   font-size: 13px;
@@ -377,9 +445,15 @@ onMounted(() => {
   margin-top: 4px;
 }
 
-.stat-card.active .stat-value { color: #667eea; }
-.stat-card.done .stat-value { color: #4caf50; }
-.stat-card.ended .stat-value { color: #ff9800; }
+.stat-card.active .stat-value {
+  color: #667eea;
+}
+.stat-card.done .stat-value {
+  color: #4caf50;
+}
+.stat-card.ended .stat-value {
+  color: #ff9800;
+}
 
 /* 区块卡片 */
 .section-card {
@@ -483,9 +557,15 @@ onMounted(() => {
   border-radius: 2px;
 }
 
-.strength-fill.weak { background: #f44336; }
-.strength-fill.medium { background: #ff9800; }
-.strength-fill.strong { background: #4caf50; }
+.strength-fill.weak {
+  background: #f44336;
+}
+.strength-fill.medium {
+  background: #ff9800;
+}
+.strength-fill.strong {
+  background: #4caf50;
+}
 
 .strength-text {
   font-size: 12px;
@@ -585,8 +665,15 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .profile-page { padding: 16px; }
-  .stat-grid { grid-template-columns: repeat(2, 1fr); }
-  .user-card { flex-direction: column; text-align: center; }
+  .profile-page {
+    padding: 16px;
+  }
+  .stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .user-card {
+    flex-direction: column;
+    text-align: center;
+  }
 }
 </style>

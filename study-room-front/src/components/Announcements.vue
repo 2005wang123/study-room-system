@@ -7,9 +7,20 @@
         <p class="announcement-subtitle">自习室最新通知与规则说明</p>
       </div>
       <button class="refresh-btn" :disabled="loading" @click="fetchAnnouncements">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" :class="{ spinning: loading }">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        <svg
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          fill="none"
+          stroke="currentColor"
+          :class="{ spinning: loading }"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+          />
         </svg>
         <span>{{ loading ? '刷新中...' : '刷新' }}</span>
       </button>
@@ -90,7 +101,9 @@
                         class="comment-delete"
                         title="删除评论"
                         @click="removeComment(c, item.id)"
-                      >✕</button>
+                      >
+                        ✕
+                      </button>
                     </div>
                     <div class="comment-content">{{ c.content }}</div>
                   </div>
@@ -112,7 +125,8 @@
               <!-- 发表评论 -->
               <div class="comment-input-row">
                 <textarea
-                  :value="draftMap[item.id] || ''" @input="draftMap[item.id] = $event.target.value"
+                  :value="draftMap[item.id] || ''"
+                  @input="onDraftInput(item.id, $event)"
                   class="comment-input"
                   rows="2"
                   maxlength="500"
@@ -123,7 +137,9 @@
                   class="comment-submit"
                   :disabled="submittingId === item.id || !(draftMap[item.id] || '').trim()"
                   @click="submitComment(item.id)"
-                >{{ submittingId === item.id ? '发送中...' : '发表' }}</button>
+                >
+                  {{ submittingId === item.id ? '发送中...' : '发表' }}
+                </button>
               </div>
             </template>
           </div>
@@ -133,8 +149,8 @@
   </div>
 </template>
 
-<script setup>
-import { ref, reactive, computed, onMounted } from 'vue';
+<script setup lang="ts">
+import { ref, reactive, computed, onMounted } from 'vue'
 import {
   getAnnouncements,
   getAnnouncementComments,
@@ -142,185 +158,207 @@ import {
   deleteAnnouncementComment,
   likeAnnouncementComment,
   unlikeAnnouncementComment
-} from '@/api/announcement';
+} from '@/api/announcement'
+import type { AnnouncementComment, AnnouncementItem, ApiErrorShape } from '@/types/api'
 
-const props = defineProps({
-  userInfo: {
-    type: Object,
-    default: () => ({ isLoggedIn: false, userId: null, role: 0 })
-  }
-});
+interface UserInfoLite {
+  isLoggedIn: boolean
+  userId: number | null
+  role?: number | string
+}
 
-const emit = defineEmits(['loaded', 'toast']);
+const props = withDefaults(
+  defineProps<{
+    userInfo: UserInfoLite
+  }>(),
+  { userInfo: () => ({ isLoggedIn: false, userId: null, role: 0 }) }
+)
 
-const list = ref([]);
-const loading = ref(false);
-const error = ref(null);
-const expandedId = ref(null);
-const keyword = ref('');
+const emit = defineEmits<{
+  (e: 'loaded', items: AnnouncementItem[]): void
+  (e: 'toast', payload: { message: string; type: 'success' | 'error' | 'info' | 'warning' }): void
+}>()
 
-// 评论数据（按公告ID缓存）
-const commentsMap = reactive({});
-const draftMap = reactive({});
-const commentLoadingId = ref(null);
-const commentErrorId = ref(null);
-const submittingId = ref(null);
-const likeActingId = ref(null);
+const list = ref<AnnouncementItem[]>([])
+const loading = ref(false)
+const error = ref<string | null>(null)
+const expandedId = ref<number | null>(null)
+const keyword = ref('')
+
+// 评论数据（按公告 ID 缓存）
+const commentsMap = reactive<Record<number, AnnouncementComment[]>>({})
+const draftMap = reactive<Record<number, string>>({})
+const commentLoadingId = ref<number | null>(null)
+const commentErrorId = ref<number | null>(null)
+const submittingId = ref<number | null>(null)
+const likeActingId = ref<number | null>(null)
 
 const filteredList = computed(() => {
-  const kw = keyword.value.trim().toLowerCase();
-  if (!kw) return list.value;
-  return list.value.filter(item =>
-    (item.title || '').toLowerCase().includes(kw) ||
-    (item.content || '').toLowerCase().includes(kw)
-  );
-});
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return list.value
+  return list.value.filter(
+    (item) => (item.title || '').toLowerCase().includes(kw) || (item.content || '').toLowerCase().includes(kw)
+  )
+})
 
-const pad = n => String(n).padStart(2, '0');
+const formatTime = (time?: string | null): string => {
+  if (!time) return '-'
+  const t = String(time).replace('T', ' ')
+  const match = t.match(/^(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2})/)
+  if (match) return `${match[1]} ${match[2]}`
+  return t
+}
 
-const formatTime = (time) => {
-  if (!time) return '-';
-  const t = String(time).replace('T', ' ');
-  const match = t.match(/^(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2})/);
-  if (match) return `${match[1]} ${match[2]}`;
-  return t;
-};
+const extractList = (data: unknown): AnnouncementItem[] => {
+  if (Array.isArray(data)) return data
+  const d = data as { rows?: AnnouncementItem[]; list?: AnnouncementItem[]; records?: AnnouncementItem[] } | null
+  if (Array.isArray(d?.rows)) return d!.rows!
+  if (Array.isArray(d?.list)) return d!.list!
+  if (Array.isArray(d?.records)) return d!.records!
+  return []
+}
 
-const extractList = (data) => {
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.rows)) return data.rows;
-  if (Array.isArray(data?.list)) return data.list;
-  if (Array.isArray(data?.records)) return data.records;
-  return [];
-};
+const getApiErrorMessage = (err: unknown, fallback: string): string => {
+  const e = err as ApiErrorShape
+  return e?.response?.data?.message || e?.message || fallback
+}
 
-const toast = (message, type = 'info') => emit('toast', { message, type });
+const toast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'info') =>
+  emit('toast', { message, type })
+
+const onDraftInput = (id: number, e: Event) => {
+  draftMap[id] = (e.target as HTMLTextAreaElement).value
+}
 
 const fetchAnnouncements = async () => {
-  loading.value = true;
-  error.value = null;
+  loading.value = true
+  error.value = null
   try {
-    const res = await getAnnouncements();
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    else if (data?.data?.code === 200) data = data.data.data;
-    list.value = extractList(data);
-    emit('loaded', list.value);
+    const res = await getAnnouncements()
+    let data: unknown = res
+    if ((data as { code?: number })?.code === 200) data = (data as { data: unknown }).data
+    else if ((data as { data?: { code?: number } })?.data?.code === 200)
+      data = (data as { data: { data: unknown } }).data.data
+    list.value = extractList(data)
+    emit('loaded', list.value)
   } catch (err) {
-    error.value = err.response?.data?.message || err.message || '加载失败，请重试';
+    error.value = getApiErrorMessage(err, '加载失败，请重试')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
-const toggleExpand = (id) => {
-  expandedId.value = expandedId.value === id ? null : id;
+const toggleExpand = (id: number) => {
+  expandedId.value = expandedId.value === id ? null : id
   if (expandedId.value === id && !commentsMap[id]) {
-    fetchComments(id);
+    fetchComments(id)
   }
-};
+}
 
 // --- 评论相关 ---
 
-const fetchComments = async (announcementId) => {
-  commentLoadingId.value = announcementId;
-  commentErrorId.value = null;
+const fetchComments = async (announcementId: number) => {
+  commentLoadingId.value = announcementId
+  commentErrorId.value = null
   try {
-    const res = await getAnnouncementComments(announcementId);
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    else if (data?.data?.code === 200) data = data.data.data;
-    commentsMap[announcementId] = Array.isArray(data) ? data : [];
+    const res = await getAnnouncementComments(announcementId)
+    let data: unknown = res
+    if ((data as { code?: number })?.code === 200) data = (data as { data: unknown }).data
+    else if ((data as { data?: { code?: number } })?.data?.code === 200)
+      data = (data as { data: { data: unknown } }).data.data
+    commentsMap[announcementId] = Array.isArray(data) ? (data as AnnouncementComment[]) : []
   } catch (err) {
-    commentErrorId.value = announcementId;
+    commentErrorId.value = announcementId
   } finally {
-    commentLoadingId.value = null;
+    commentLoadingId.value = null
   }
-};
+}
 
-const submitComment = async (announcementId) => {
+const submitComment = async (announcementId: number) => {
   if (!props.userInfo.isLoggedIn) {
-    toast('请先登录后再发表评论', 'warning');
-    return;
+    toast('请先登录后再发表评论', 'warning')
+    return
   }
-  const content = (draftMap[announcementId] || '').trim();
-  if (!content) return;
-  submittingId.value = announcementId;
+  const content = (draftMap[announcementId] || '').trim()
+  if (!content) return
+  submittingId.value = announcementId
   try {
-    const res = await addAnnouncementComment(announcementId, content);
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    else if (data?.data?.code === 200) data = data.data.data;
-    if (data && data.id) {
-      if (!commentsMap[announcementId]) commentsMap[announcementId] = [];
-      commentsMap[announcementId].unshift(data);
+    const res = await addAnnouncementComment(announcementId, content)
+    let data: unknown = res
+    if ((data as { code?: number })?.code === 200) data = (data as { data: unknown }).data
+    else if ((data as { data?: { code?: number } })?.data?.code === 200)
+      data = (data as { data: { data: unknown } }).data.data
+    const created = data as AnnouncementComment | null
+    if (created && created.id) {
+      if (!commentsMap[announcementId]) commentsMap[announcementId] = []
+      commentsMap[announcementId].unshift(created)
     } else {
       // 后端未返回完整对象时刷新列表
-      await fetchComments(announcementId);
+      await fetchComments(announcementId)
     }
-    draftMap[announcementId] = '';
-    toast('✅ 评论成功', 'success');
+    draftMap[announcementId] = ''
+    toast('✅ 评论成功', 'success')
   } catch (err) {
-    toast(`✗ ${err.response?.data?.message || err.message || '评论失败'}`, 'error');
+    toast(`✗ ${getApiErrorMessage(err, '评论失败')}`, 'error')
   } finally {
-    submittingId.value = null;
+    submittingId.value = null
   }
-};
+}
 
-const removeComment = async (comment, announcementId) => {
-  if (!confirm('确认删除这条评论？')) return;
-  likeActingId.value = comment.id;
+const removeComment = async (comment: AnnouncementComment, announcementId: number) => {
+  if (!window.confirm('确认删除这条评论？')) return
+  likeActingId.value = comment.id
   try {
-    await deleteAnnouncementComment(comment.id);
-    commentsMap[announcementId] = (commentsMap[announcementId] || []).filter(c => c.id !== comment.id);
-    toast('✅ 评论已删除', 'success');
+    await deleteAnnouncementComment(comment.id)
+    commentsMap[announcementId] = (commentsMap[announcementId] || []).filter((c) => c.id !== comment.id)
+    toast('✅ 评论已删除', 'success')
   } catch (err) {
-    toast(`✗ ${err.response?.data?.message || err.message || '删除失败'}`, 'error');
+    toast(`✗ ${getApiErrorMessage(err, '删除失败')}`, 'error')
   } finally {
-    likeActingId.value = null;
+    likeActingId.value = null
   }
-};
+}
 
-const toggleLike = async (comment, announcementId) => {
+const toggleLike = async (comment: AnnouncementComment, announcementId: number) => {
   if (!props.userInfo.isLoggedIn) {
-    toast('请先登录后再点赞', 'warning');
-    return;
+    toast('请先登录后再点赞', 'warning')
+    return
   }
-  if (likeActingId.value === comment.id) return;
-  likeActingId.value = comment.id;
-  const target = (commentsMap[announcementId] || []).find(c => c.id === comment.id);
+  if (likeActingId.value === comment.id) return
+  likeActingId.value = comment.id
+  const target = (commentsMap[announcementId] || []).find((c) => c.id === comment.id)
   try {
     if (comment.liked) {
-      await unlikeAnnouncementComment(comment.id);
+      await unlikeAnnouncementComment(comment.id)
       if (target) {
-        target.liked = false;
-        target.likeCount = Math.max(0, (target.likeCount || 0) - 1);
+        target.liked = false
+        target.likeCount = Math.max(0, (target.likeCount || 0) - 1)
       }
     } else {
-      await likeAnnouncementComment(comment.id);
+      await likeAnnouncementComment(comment.id)
       if (target) {
-        target.liked = true;
-        target.likeCount = (target.likeCount || 0) + 1;
+        target.liked = true
+        target.likeCount = (target.likeCount || 0) + 1
       }
     }
   } catch (err) {
-    toast(`✗ ${err.response?.data?.message || err.message || '操作失败'}`, 'error');
+    toast(`✗ ${getApiErrorMessage(err, '操作失败')}`, 'error')
   } finally {
-    likeActingId.value = null;
+    likeActingId.value = null
   }
-};
+}
 
-const canDeleteComment = (comment) => {
-  if (Number(props.userInfo.role) === 1) return true;
-  return props.userInfo.isLoggedIn && Number(comment.userId) === Number(props.userInfo.userId);
-};
+const canDeleteComment = (comment: AnnouncementComment): boolean => {
+  if (Number(props.userInfo.role) === 1) return true
+  return props.userInfo.isLoggedIn && Number(comment.userId) === Number(props.userInfo.userId)
+}
 
-const avatarChar = (comment) => {
-  const name = comment.username || '用';
-  return name ? name[0].toUpperCase() : '用';
-};
+const avatarChar = (comment: AnnouncementComment): string => {
+  const name = comment.username || '用'
+  return name ? name[0].toUpperCase() : '用'
+}
 
-onMounted(fetchAnnouncements);
+onMounted(fetchAnnouncements)
 </script>
 
 <style scoped>
@@ -385,8 +423,12 @@ onMounted(fetchAnnouncements);
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 搜索 */
@@ -736,6 +778,8 @@ onMounted(fetchAnnouncements);
 }
 
 @media (max-width: 768px) {
-  .announcement-page { padding: 16px; }
+  .announcement-page {
+    padding: 16px;
+  }
 }
 </style>

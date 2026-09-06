@@ -1,1096 +1,1432 @@
 <template>
-  <div class="layout-editor">
-    <div class="editor-topbar">
-      <div class="topbar-left">
-        <span class="topbar-label">编辑楼层</span>
-        <select v-model="selectedFloorId" @change="onFloorChange" class="floor-select">
-          <option v-for="f in floors" :key="f.id" :value="f.id">{{ f.floor_name || f.floorName }}</option>
+  <div class="floor-editor">
+    <!-- 顶部工具栏 -->
+    <div class="fe-bar">
+      <div class="fe-bar-sec">
+        <span class="fe-label">楼层</span>
+        <select class="fe-select" :value="floorId ?? ''" @change="handleFloorChange">
+          <option value="" disabled>请选择楼层</option>
+          <option v-for="fl in floors" :key="fl.id" :value="fl.id">
+            {{ fl.floorName || fl.floor_name }}
+          </option>
+        </select>
+        <button type="button" class="fe-btn ghost" title="自定义 / 创建楼层与区域" @click="managerVisible = true">
+          🗂 楼层/区域管理
+        </button>
+      </div>
+
+      <div class="fe-tools">
+        <button
+          v-for="t in tools"
+          :key="t.id"
+          type="button"
+          class="fe-tool"
+          :class="{ active: mode === t.id }"
+          :title="t.tip"
+          @click="mode = t.id"
+        >
+          <span class="fe-tool-icon">{{ t.icon }}</span
+          >{{ t.label }}
+        </button>
+        <select v-if="mode === 'seat'" v-model.number="seatToolType" class="fe-select seat-type" title="新座位类型">
+          <option :value="1">普通</option>
+          <option :value="2">靠窗</option>
+          <option :value="3">带插座</option>
         </select>
       </div>
-      <div class="topbar-right">
-        <button class="tb-btn" @click="undo" :disabled="!canUndo" title="撤销 Ctrl+Z">↩️ 撤销</button>
-        <button class="tb-btn" @click="redo" :disabled="!canRedo" title="重做 Ctrl+Shift+Z">↪️ 重做</button>
-        <span class="tb-sep"></span>
-        <button class="tb-btn" @click="zoomOut" title="缩小">−</button>
-        <span class="tb-zoom">{{ Math.round(zoom * 100) }}%</span>
-        <button class="tb-btn" @click="zoomIn" title="放大">＋</button>
-        <button class="tb-btn" @click="fitView" title="适应窗口">⛶ 适应</button>
-        <span class="tb-sep"></span>
-        <button class="tb-btn primary" @click="handleSaveDraft" :disabled="saving">💾 保存草稿</button>
-        <button class="tb-btn publish" @click="handlePublish" :disabled="saving">🚀 发布</button>
+
+      <div class="fe-bar-sec">
+        <button type="button" class="fe-btn" title="撤销 Ctrl+Z" :disabled="!canUndo" @click="undo">↶</button>
+        <button type="button" class="fe-btn" title="重做 Ctrl+Y" :disabled="!canRedo" @click="redo">↷</button>
+        <button type="button" class="fe-btn danger" :disabled="!selectedId" @click="deleteSelected">删除</button>
+        <span class="fe-sep"></span>
+        <button type="button" class="fe-btn" title="缩小" @click="zoomOut">－</button>
+        <span class="fe-zoom">{{ Math.round(zoom * 100) }}%</span>
+        <button type="button" class="fe-btn" title="放大" @click="zoomIn">＋</button>
+        <button type="button" class="fe-btn" @click="fitView">适应</button>
+        <button type="button" class="fe-btn" @click="resetView">100%</button>
+        <span class="fe-sep"></span>
+        <button type="button" class="fe-btn" @click="pickBg" :title="doc.canvas?.bgImage ? '更换底图' : '上传底图'">
+          {{ doc.canvas?.bgImage ? '换底图' : '底图' }}
+        </button>
+        <button v-if="doc.canvas?.bgImage" type="button" class="fe-btn" @click="removeBg">去底图</button>
+        <input ref="bgFileEl" type="file" accept="image/*" class="fe-hidden" @change="onBgFile" />
+        <button type="button" class="fe-btn" @click="clearAll">清空</button>
+        <span class="fe-sep"></span>
+        <button type="button" class="fe-btn ghost" :disabled="!dirty" @click="reloadLayout">放弃修改</button>
+        <button type="button" class="fe-btn" :disabled="saving || !floorId" @click="saveDraft">
+          {{ saving ? '保存中…' : '存草稿' }}
+        </button>
+        <button type="button" class="fe-btn primary" :disabled="publishing || !floorId" @click="publishNow">
+          {{ publishing ? '发布中…' : '🚀 发布' }}
+        </button>
       </div>
     </div>
 
-    <div class="editor-body">
-      <div class="tool-panel">
-        <div class="tool-group">
-          <button class="tool-btn" :class="{ active: mode === 'select' }" @click="setMode('select')" title="选择/移动 (V)">
-            <span class="tool-icon">🖱️</span><span class="tool-name">选择</span>
-          </button>
-          <button class="tool-btn" :class="{ active: mode === 'pan' }" @click="setMode('pan')" title="平移画布 (H)">
-            <span class="tool-icon">✋</span><span class="tool-name">平移</span>
-          </button>
-        </div>
-        <div class="tool-divider"></div>
-        <div class="tool-group">
-          <button class="tool-btn" :class="{ active: mode === 'area' }" @click="setMode('area')" title="绘制区域/房间">
-            <span class="tool-icon">📦</span><span class="tool-name">区域</span>
-          </button>
-          <button class="tool-btn" :class="{ active: mode === 'wall' }" @click="setMode('wall')" title="绘制墙体/隔断">
-            <span class="tool-icon">📏</span><span class="tool-name">墙体</span>
-          </button>
-          <button class="tool-btn" :class="{ active: mode === 'path' }" @click="setMode('path')" title="自由画笔">
-            <span class="tool-icon">✏️</span><span class="tool-name">画笔</span>
-          </button>
-        </div>
-        <div class="tool-divider"></div>
-        <div class="tool-group">
-          <button class="tool-btn" :class="{ active: mode === 'seat' }" @click="setMode('seat')" title="放置座位">
-            <span class="tool-icon">🪑</span><span class="tool-name">座位</span>
-          </button>
-          <div class="seat-type-row" v-if="mode === 'seat'">
-            <select v-model="seatType" class="mini-select" title="座位类型">
-              <option :value="1">普通座</option>
-              <option :value="2">靠窗座</option>
-              <option :value="3">插座座</option>
-            </select>
-          </div>
-          <button class="tool-btn" :class="{ active: mode === 'text' }" @click="setMode('text')" title="添加文字">
-            <span class="tool-icon">🔤</span><span class="tool-name">文字</span>
-          </button>
-        </div>
-        <div class="tool-divider"></div>
-        <div class="tool-group">
-          <label class="tool-btn upload-btn" title="上传楼层底图">
-            <span class="tool-icon">🖼️</span><span class="tool-name">底图</span>
-            <input type="file" accept="image/*" class="hidden-file" @change="handleBgUpload" />
-          </label>
-          <button class="tool-btn danger" @click="deleteSelected" :disabled="!hasSelection" title="删除选中 (Delete)">
-            <span class="tool-icon">🗑️</span><span class="tool-name">删除</span>
-          </button>
-          <button class="tool-btn" @click="duplicateSelected" :disabled="!hasSelection" title="复制选中 (Ctrl+D)">
-            <span class="tool-icon">📋</span><span class="tool-name">复制</span>
-          </button>
-        </div>
-        <div class="tool-divider"></div>
-        <div class="tool-hint">
-          <p>💡 提示</p>
-          <p>· 滚轮缩放，空格+拖拽平移</p>
-          <p>· 双击文字可编辑</p>
-          <p>· Ctrl+Z 撤销</p>
-          <p>· 发布时自动同步座位</p>
+    <!-- 画布 + 属性面板 -->
+    <div class="fe-main">
+      <div ref="viewportEl" class="fe-viewport">
+        <svg
+          ref="svgEl"
+          class="fe-svg"
+          :width="sceneW * zoom"
+          :height="sceneH * zoom"
+          :viewBox="`0 0 ${sceneW} ${sceneH}`"
+          @pointerdown="onSvgPointerDown"
+        >
+          <!-- 画布背景与底图 -->
+          <rect x="0" y="0" :width="sceneW" :height="sceneH" class="fe-bg" />
+          <image
+            v-if="doc.canvas?.bgImage"
+            :href="doc.canvas.bgImage"
+            x="0"
+            y="0"
+            :width="sceneW"
+            :height="sceneH"
+            preserveAspectRatio="xMidYMid meet"
+          />
+
+          <!-- 区域 -->
+          <g v-for="a in doc.areas" :key="a.id" :data-fid="a.id">
+            <rect
+              :x="a.x"
+              :y="a.y"
+              :width="a.w"
+              :height="a.h"
+              :fill="a.fill || areaFill"
+              :stroke="a.stroke || areaStroke"
+              stroke-width="2"
+              rx="6"
+            />
+            <text v-if="a.name" :x="a.x + 10" :y="a.y + 22" class="fe-area-name">{{ a.name }}</text>
+          </g>
+
+          <!-- 墙体 -->
+          <line
+            v-for="wl in doc.walls"
+            :key="wl.id"
+            :data-fid="wl.id"
+            :x1="wl.x1"
+            :y1="wl.y1"
+            :x2="wl.x2"
+            :y2="wl.y2"
+            :stroke="wl.color || '#8a8a96'"
+            :stroke-width="wl.thickness || 8"
+            stroke-linecap="round"
+          />
+
+          <!-- 自由画笔 -->
+          <polyline
+            v-for="pt in doc.paths"
+            :key="pt.id"
+            :data-fid="pt.id"
+            :points="polyPoints(pt.points)"
+            :stroke="pt.color || '#999999'"
+            :stroke-width="pt.thickness || 5"
+            fill="none"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+
+          <!-- 文字 -->
+          <text
+            v-for="tx in doc.texts"
+            :key="tx.id"
+            :data-fid="tx.id"
+            :x="tx.x"
+            :y="tx.y"
+            :font-size="tx.fontSize || 24"
+            :fill="tx.color || '#e6e6ee'"
+            class="fe-text"
+          >
+            {{ tx.content }}
+          </text>
+
+          <!-- 座位 -->
+          <g
+            v-for="s in doc.seats"
+            :key="s.id"
+            :data-fid="s.id"
+            :transform="`translate(${s.x + (s.w || 44) / 2} ${s.y + (s.h || 44) / 2}) rotate(${s.rotation || 0})`"
+          >
+            <rect
+              :x="-(s.w || 44) / 2"
+              :y="-(s.h || 44) / 2"
+              :width="s.w || 44"
+              :height="s.h || 44"
+              rx="6"
+              :fill="seatFill(s.seatType, s.status)"
+              stroke="rgba(255,255,255,0.35)"
+              stroke-width="1"
+            />
+            <text
+              x="0"
+              y="0"
+              text-anchor="middle"
+              dominant-baseline="central"
+              class="fe-seat-no"
+              :font-size="Math.max(10, Math.min(15, (s.w || 44) / 4.5))"
+            >
+              {{ s.seatNo }}
+            </text>
+          </g>
+
+          <!-- 绘制预览 -->
+          <g v-if="preview" class="fe-preview">
+            <rect
+              v-if="preview.kind === 'area'"
+              :x="previewRect.x"
+              :y="previewRect.y"
+              :width="previewRect.w"
+              :height="previewRect.h"
+              fill="rgba(102,126,234,0.18)"
+              stroke="#9db4ff"
+              stroke-width="2"
+              stroke-dasharray="6 4"
+            />
+            <line
+              v-else-if="preview.kind === 'wall'"
+              :x1="preview.x1"
+              :y1="preview.y1"
+              :x2="preview.x2"
+              :y2="preview.y2"
+              stroke="#9db4ff"
+              stroke-width="3"
+              stroke-dasharray="6 4"
+            />
+            <polyline
+              v-else-if="preview.kind === 'path'"
+              :points="polyPoints(preview.points)"
+              stroke="#9db4ff"
+              stroke-width="3"
+              fill="none"
+              stroke-dasharray="6 4"
+            />
+          </g>
+
+          <!-- 选中框 -->
+          <rect
+            v-if="selBox"
+            :x="selBox.x - 5"
+            :y="selBox.y - 5"
+            :width="selBox.w + 10"
+            :height="selBox.h + 10"
+            class="fe-selbox"
+          />
+        </svg>
+
+        <div v-if="loadingLayout" class="fe-overlay">加载中…</div>
+        <div v-else-if="isEmpty" class="fe-overlay fe-hint">
+          左侧工具栏选择「区域 / 座位 / 墙体 / 画笔 / 文字」开始绘制
         </div>
       </div>
 
-      <div class="canvas-wrap" ref="canvasWrapEl">
-        <div v-if="!selectedFloorId" class="canvas-empty"><p>请先选择要编辑的楼层</p></div>
-        <canvas ref="canvasEl"></canvas>
+      <FloorPropPanel
+        v-if="panelNode"
+        :kind="panelNode.kind"
+        :obj="panelNode.obj"
+        :areas="areaOptions"
+        @change="onPropChange"
+        @delete="deleteSelected"
+      />
+      <div v-else class="fe-panel-empty">
+        <p>📌 使用提示</p>
+        <ul>
+          <li>选择工具：点选对象后可拖动</li>
+          <li>绘制区域：先画大区域，内部可再细分</li>
+          <li>座位编号自动按“楼层-序号”生成</li>
+          <li>完成后记得「存草稿」或「发布」</li>
+        </ul>
+        <p v-if="dirty" class="fe-dirty">● 有未保存修改</p>
       </div>
 
-      <div class="prop-panel">
-        <div v-if="!selected" class="prop-empty">
-          <p>🏷️ 未选中对象</p>
-          <p class="prop-sub">选择画布中的元素后可编辑属性</p>
-        </div>
-        <div v-else class="prop-content">
-          <h4 class="prop-title">{{ propTitle }}</h4>
-          <div class="prop-row"><label>X</label><input type="number" v-model.number="propX" @change="applyProp('x')" /></div>
-          <div class="prop-row"><label>Y</label><input type="number" v-model.number="propY" @change="applyProp('y')" /></div>
-          <div class="prop-row" v-if="selected.dataType === 'seat'"><label>旋转</label><input type="number" v-model.number="propRotation" @change="applyProp('rotation')" /></div>
-          <div class="prop-sep"></div>
-          <template v-if="selected.dataType === 'area'">
-            <div class="prop-row"><label>名称</label><input v-model="propName" @change="applyProp('name')" /></div>
-            <div class="prop-row"><label>宽度</label><input type="number" v-model.number="propW" @change="applyProp('w')" /></div>
-            <div class="prop-row"><label>高度</label><input type="number" v-model.number="propH" @change="applyProp('h')" /></div>
-            <div class="prop-row"><label>填充色</label><input type="color" v-model="propFill" @change="applyProp('fill')" /></div>
-            <div class="prop-row"><label>边框色</label><input type="color" v-model="propStroke" @change="applyProp('stroke')" /></div>
-          </template>
-          <template v-else-if="selected.dataType === 'seat'">
-            <div class="prop-row"><label>编号</label><input v-model="propSeatNo" @change="applyProp('seatNo')" /></div>
-            <div class="prop-row">
-              <label>类型</label>
-              <select v-model.number="propSeatType" @change="applyProp('seatType')">
-                <option :value="1">普通座</option><option :value="2">靠窗座</option><option :value="3">插座座</option>
-              </select>
-            </div>
-            <div class="prop-row">
-              <label>所属区域</label>
-              <select v-model="propAreaId" @change="applyProp('areaId')">
-                <option :value="null">未分配</option>
-                <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.area_name || a.areaName }}</option>
-              </select>
-            </div>
-            <div class="prop-row">
-              <label>状态</label>
-              <select v-model.number="propSeatStatus" @change="applyProp('seatStatus')">
-                <option :value="0">正常</option><option :value="3">维修中</option>
-              </select>
-            </div>
-            <div class="prop-row"><label>尺寸</label><input type="number" v-model.number="propSeatSize" @change="applyProp('seatSize')" /></div>
-            <div class="prop-note" v-if="selected.data?.seatId">已关联数据库座位 #{{ selected.data.seatId }}</div>
-            <div class="prop-note" v-else>⚠️ 新座位，发布后自动入库</div>
-          </template>
-          <template v-else-if="selected.dataType === 'wall' || selected.dataType === 'path'">
-            <div class="prop-row"><label>粗细</label><input type="number" v-model.number="propThickness" @change="applyProp('thickness')" /></div>
-            <div class="prop-row"><label>颜色</label><input type="color" v-model="propColor" @change="applyProp('color')" /></div>
-          </template>
-          <template v-else-if="selected.dataType === 'text'">
-            <div class="prop-row"><label>内容</label><input v-model="propContent" @change="applyProp('content')" /></div>
-            <div class="prop-row"><label>字号</label><input type="number" v-model.number="propFontSize" @change="applyProp('fontSize')" /></div>
-            <div class="prop-row"><label>颜色</label><input type="color" v-model="propColor" @change="applyProp('color')" /></div>
-          </template>
-        </div>
-      </div>
+      <FloorAreaManager
+        v-if="managerVisible"
+        @close="managerVisible = false"
+        @toast="onManagerToast"
+        @changed="onCatalogChanged"
+      />
     </div>
   </div>
 </template>
-<script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
-import { Canvas, Rect, Line, Textbox, Group, PencilBrush, FabricImage, Point, Path } from 'fabric';
-import { getFloors, getAreas } from '@/api/seat';
-import { getDraftLayout, saveDraftLayout, publishLayout } from '@/api/floorLayout';
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { getAreas, getFloors } from '@/api/seat'
+import { getDraftLayout, publishLayout, saveDraftLayout } from '@/api/floorLayout'
+import type { ApiErrorShape, AreaInfo, FloorInfo } from '@/types/api'
+import type {
+  LayoutAreaShape,
+  LayoutCanvasShape,
+  LayoutPathShape,
+  LayoutSeatShape,
+  LayoutTextShape,
+  LayoutWallShape
+} from '@/types/layout'
+import FloorPropPanel from './floor-editor/FloorPropPanel.vue'
+import FloorAreaManager from './floor-editor/FloorAreaManager.vue'
+import type { EditableNode, EditorKind, EditorTool } from './floor-editor/types'
+import {
+  MAX_ZOOM,
+  MIN_ZOOM,
+  SCENE_H_DEFAULT,
+  SCENE_W_DEFAULT,
+  areaDefaultFill,
+  areaDefaultStroke,
+  boundsOf,
+  clamp,
+  clampRectToScene,
+  isSeatNoDuplicate,
+  nextSeatNo,
+  normalizeRect,
+  pointInRect,
+  pointOnPolyline,
+  round1,
+  seatFill,
+  uid
+} from '@/utils/floorEditor'
 
-const emit = defineEmits(['toast']);
+type ToastType = 'success' | 'error' | 'info' | 'warning'
 
-// ---------- 基础状态 ----------
-const canvasEl = ref(null);
-const canvasWrapEl = ref(null);
-const floors = ref([]);
-const areas = ref([]);
-const selectedFloorId = ref(null);
-const saving = ref(false);
-const mode = ref('select');
-const seatType = ref(1);
-const zoom = ref(1);
-const floorNumber = ref(1);
+const emit = defineEmits<{
+  (e: 'toast', payload: { message: string; type: ToastType }): void
+}>()
+const toast = (message: string, type: ToastType = 'info') => emit('toast', { message, type })
+const onManagerToast = (payload: { message: string; type: ToastType }) => toast(payload.message, payload.type)
 
-let canvas = null;
-let sceneW = 1600;
-let sceneH = 1100;
-let bgImageSrc = '';
-let historyStack = [];
-let historyIndex = -1;
-let historyTimer = null;
-let isSpaceDown = false;
-let isPanning = false;
-let panStart = null;
-let drawStart = null;
-let tmpDrawObj = null;
-let loadingLock = false;
+// ============ 文档模型 ============
+interface EditorDoc {
+  canvas?: LayoutCanvasShape
+  areas: LayoutAreaShape[]
+  walls: LayoutWallShape[]
+  paths: LayoutPathShape[]
+  texts: LayoutTextShape[]
+  seats: LayoutSeatShape[]
+}
 
-// ---------- 选中对象与属性面板 ----------
-const selected = ref(null);
-const propX = ref(0); const propY = ref(0); const propRotation = ref(0);
-const propName = ref(''); const propW = ref(0); const propH = ref(0);
-const propFill = ref('#667eea'); const propStroke = ref('#667eea');
-const propSeatNo = ref(''); const propSeatType = ref(1); const propAreaId = ref(null);
-const propSeatStatus = ref(0); const propSeatSize = ref(44);
-const propThickness = ref(8); const propColor = ref('#888888');
-const propContent = ref(''); const propFontSize = ref(24);
+function emptyDoc(): EditorDoc {
+  return {
+    canvas: { width: SCENE_W_DEFAULT, height: SCENE_H_DEFAULT, bgImage: '' },
+    areas: [],
+    walls: [],
+    paths: [],
+    texts: [],
+    seats: []
+  }
+}
 
-const hasSelection = computed(() => {
-  if (!canvas) return false;
-  const objs = canvas.getActiveObjects();
-  return objs && objs.length > 0;
-});
-const canUndo = computed(() => historyIndex > 0);
-const canRedo = computed(() => historyIndex < historyStack.length - 1);
-const propTitle = computed(() => {
-  if (!selected.value) return '';
-  const map = { area: '区域属性', seat: '座位属性', wall: '墙体属性', path: '画笔属性', text: '文字属性' };
-  return map[selected.value.dataType] || '对象属性';
-});
+function normalizeDoc(d: Partial<EditorDoc>): EditorDoc {
+  const base = emptyDoc()
+  const canvas = d.canvas || {}
+  return {
+    canvas: {
+      ...base.canvas,
+      ...canvas,
+      width: Number(canvas.width) || SCENE_W_DEFAULT,
+      height: Number(canvas.height) || SCENE_H_DEFAULT,
+      bgImage: typeof canvas.bgImage === 'string' ? canvas.bgImage : ''
+    },
+    areas: Array.isArray(d.areas) ? (d.areas as LayoutAreaShape[]) : [],
+    walls: Array.isArray(d.walls) ? (d.walls as LayoutWallShape[]) : [],
+    paths: Array.isArray(d.paths) ? (d.paths as LayoutPathShape[]) : [],
+    texts: Array.isArray(d.texts) ? (d.texts as LayoutTextShape[]) : [],
+    seats: Array.isArray(d.seats) ? (d.seats as LayoutSeatShape[]) : []
+  }
+}
 
-// ---------- 工具函数 ----------
-const uid = (p) => p + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-const toast = (msg, type = 'info') => emit('toast', { message: msg, type });
-const getObjData = (obj) => obj?.data || {};
+const doc = ref<EditorDoc>(emptyDoc())
+const sceneW = computed(() => Number(doc.value.canvas?.width) || SCENE_W_DEFAULT)
+const sceneH = computed(() => Number(doc.value.canvas?.height) || SCENE_H_DEFAULT)
+const areaFill = areaDefaultFill()
+const areaStroke = areaDefaultStroke()
+const isEmpty = computed(
+  () =>
+    doc.value.areas.length === 0 &&
+    doc.value.walls.length === 0 &&
+    doc.value.paths.length === 0 &&
+    doc.value.texts.length === 0 &&
+    doc.value.seats.length === 0
+)
 
-// ---------- 楼层与区域 ----------
+// ============ 楼层 / 区域（数据库区域用于座位归属） ============
+const floors = ref<FloorInfo[]>([])
+const areaOptions = ref<AreaInfo[]>([])
+const floorId = ref<number | null>(null)
+const floorNumber = ref(1)
+
+const floorName = computed(() => {
+  const f = floors.value.find((x) => x.id === floorId.value)
+  return f ? f.floorName || f.floor_name || `楼层 ${floorId.value}` : ''
+})
+
+function unwrapArr<T>(res: unknown): T[] {
+  if (Array.isArray(res)) return res as T[]
+  const r = res as { code?: number; data?: unknown } | null
+  if (r && r.code === 200) {
+    const d = r.data
+    if (Array.isArray(d)) return d as T[]
+    const page = d as { records?: T[]; list?: T[] } | null
+    if (Array.isArray(page?.records)) return page!.records!
+    if (Array.isArray(page?.list)) return page!.list!
+  }
+  return []
+}
+
 const loadFloors = async () => {
   try {
-    const res = await getFloors();
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    floors.value = Array.isArray(data) ? data : [];
-    if (floors.value.length && !selectedFloorId.value) {
-      selectedFloorId.value = floors.value[0].id;
+    const res = await getFloors()
+    floors.value = unwrapArr<FloorInfo>(res)
+    if (floors.value.length && floorId.value == null) {
+      floorId.value = floors.value[0].id
     }
-    if (selectedFloorId.value) await onFloorChange();
-  } catch (e) {
-    toast('楼层加载失败: ' + (e.message || ''), 'error');
+    if (floorId.value != null) await switchFloor()
+  } catch (err) {
+    toast('楼层加载失败：' + errMsg(err, '请检查后端服务'), 'error')
   }
-};
+}
 
-const loadAreas = async () => {
-  if (!selectedFloorId.value) { areas.value = []; return; }
-  try {
-    const res = await getAreas(selectedFloorId.value);
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    areas.value = Array.isArray(data) ? data : [];
-  } catch (e) {
-    areas.value = [];
+const loadAreaOptions = async () => {
+  if (floorId.value == null) {
+    areaOptions.value = []
+    return
   }
-};
-
-const onFloorChange = async () => {
-  await loadAreas();
-  const f = floors.value.find(x => x.id === selectedFloorId.value);
-  floorNumber.value = f ? Number(f.floor_number ?? f.floorNumber ?? 1) : 1;
-  if (!canvas) return;
   try {
-    const res = await getDraftLayout(selectedFloorId.value);
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    if (data && data.layoutJson) {
-      await loadBusinessJson(data.layoutJson);
+    const res = await getAreas(floorId.value)
+    areaOptions.value = unwrapArr<AreaInfo>(res)
+  } catch (err) {
+    areaOptions.value = []
+  }
+}
+
+const switchFloor = async () => {
+  const f = floors.value.find((x) => x.id === floorId.value)
+  floorNumber.value = f ? Number(f.floor_number ?? f.floorNumber ?? 1) || 1 : 1
+  await loadAreaOptions()
+  await loadLayout()
+}
+
+/** 楼层/区域管理弹窗关闭后刷新目录；若当前楼层被删除则自动切换到第一个可用楼层 */
+const refreshCatalog = async () => {
+  try {
+    const res = await getFloors()
+    floors.value = unwrapArr<FloorInfo>(res)
+  } catch (err) {
+    // 忽略：仅刷新目录
+  }
+  if (floorId.value != null && !floors.value.some((x) => x.id === floorId.value)) {
+    if (floors.value.length) {
+      floorId.value = floors.value[0].id
+      await switchFloor()
     } else {
-      clearCanvas();
+      floorId.value = null
+      doc.value = emptyDoc()
+      lastSavedJson.value = JSON.stringify(doc.value)
+      areaOptions.value = []
+      selectedId.value = null
     }
-  } catch (e) {
-    clearCanvas();
-  }
-};
-
-// ---------- 画布初始化 ----------
-const applyZoom = (z) => {
-  z = Math.min(3, Math.max(0.2, z));
-  zoom.value = z;
-  canvas.setZoom(1);
-  canvas.setDimensions({ width: sceneW * z, height: sceneH * z }, { cssOnly: true });
-  canvas.requestRenderAll();
-};
-
-const zoomIn = () => applyZoom(zoom.value * 1.2);
-
-// 统一管理场景尺寸与缩放：backing store 用场景尺寸，CSS 尺寸随缩放变化
-const applySceneSize = () => {
-  canvas.setDimensions({ width: sceneW, height: sceneH }, { backstoreOnly: true });
-  applyZoom(zoom.value);
-};
-const fitAfterLoad = () => setTimeout(fitView, 100);
-const zoomOut = () => applyZoom(zoom.value / 1.2);
-const fitView = () => {
-  const wrap = canvasWrapEl.value;
-  if (!wrap) return;
-  const w = wrap.clientWidth - 40;
-  const h = wrap.clientHeight - 40;
-  const z = Math.min(w / sceneW, h / sceneH, 1.2);
-  applyZoom(Math.max(0.2, z));
-};
-
-const initCanvas = () => {
-  canvas = new Canvas(canvasEl.value, {
-    width: sceneW,
-    height: sceneH,
-    backgroundColor: '#12121a',
-    selection: true,
-    preserveObjectStacking: true
-  });
-  canvas.freeDrawingBrush = new PencilBrush(canvas);
-  canvas.freeDrawingBrush.width = 5;
-  canvas.freeDrawingBrush.color = '#999999';
-  window.__canvas = canvas; // debug
-  canvas.on('mouse:down', onMouseDown);
-  canvas.on('mouse:move', onMouseMove);
-  canvas.on('mouse:up', onMouseUp);
-  canvas.on('mouse:wheel', onWheel);
-  canvas.on('mouse:down:before', (opt) => {
-    if (isSpaceDown || mode.value === 'pan') {
-      isPanning = true;
-      panStart = { x: opt.e.clientX, y: opt.e.clientY };
-    }
-  });
-
-  canvas.on('selection:created', onSelectionChange);
-  canvas.on('selection:updated', onSelectionChange);
-  canvas.on('selection:cleared', onSelectionClear);
-
-  canvas.on('object:modified', onObjectModified);
-  canvas.on('object:added', onObjectAdded);
-  canvas.on('object:removed', onObjectRemoved);
-
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-
-  setTimeout(fitView, 100);
-  if (selectedFloorId.value) onFloorChange();
-};
-
-const disposeCanvas = () => {
-  if (canvas) {
-    canvas.dispose();
-    canvas = null;
-  }
-  window.removeEventListener('keydown', onKeyDown);
-  window.removeEventListener('keyup', onKeyUp);
-};
-// ---------- 鼠标事件 ----------
-const onMouseDown = (opt) => {
-  if (mode.value === 'pan' || isSpaceDown) return;
-  if (mode.value === 'seat') { addSeatAt(opt.scenePoint); return; }
-  if (mode.value === 'text') { addTextAt(opt.scenePoint); return; }
-  if (mode.value === 'area') {
-    drawStart = { x: opt.scenePoint.x, y: opt.scenePoint.y };
-    tmpDrawObj = new Rect({
-      left: drawStart.x, top: drawStart.y, width: 1, height: 1,
-      fill: 'rgba(102,126,234,0.38)', stroke: '#667eea', strokeWidth: 2, rx: 6, ry: 6,
-      originX: 'left', originY: 'top',
-      dataType: 'area', data: { id: uid('a'), name: '新区域' }
-    });
-    canvas.add(tmpDrawObj);
-    return;
-  }
-  if (mode.value === 'wall') {
-    drawStart = { x: opt.scenePoint.x, y: opt.scenePoint.y };
-    tmpDrawObj = new Line([drawStart.x, drawStart.y, drawStart.x, drawStart.y], {
-      stroke: '#8a8a96', strokeWidth: 8,
-      originX: 'left', originY: 'top',
-      dataType: 'wall', data: { id: uid('w') }
-    });
-    canvas.add(tmpDrawObj);
-  }
-};
-
-const onMouseMove = (opt) => {
-  if (isPanning) {
-    const dx = opt.e.clientX - panStart.x;
-    const dy = opt.e.clientY - panStart.y;
-    panStart = { x: opt.e.clientX, y: opt.e.clientY };
-    const vpt = canvas.viewportTransform;
-    vpt[4] += dx;
-    vpt[5] += dy;
-    canvas.requestRenderAll();
-    return;
-  }
-  if (!tmpDrawObj) return;
-  const p = opt.scenePoint;
-  if (mode.value === 'area') {
-    const left = Math.min(drawStart.x, p.x);
-    const top = Math.min(drawStart.y, p.y);
-    tmpDrawObj.set({ left, top, width: Math.abs(p.x - drawStart.x), height: Math.abs(p.y - drawStart.y) });
-  } else if (mode.value === 'wall') {
-    tmpDrawObj.set({ x2: p.x, y2: p.y });
-  }
-  tmpDrawObj.setCoords();
-  canvas.requestRenderAll();
-};
-
-const onMouseUp = () => {
-  isPanning = false;
-  if (tmpDrawObj) {
-    if (mode.value === 'area' && (tmpDrawObj.width < 20 || tmpDrawObj.height < 20)) {
-      canvas.remove(tmpDrawObj);
-    } else {
-      tmpDrawObj.setCoords();
-      recordHistory();
-      canvas.setActiveObject(tmpDrawObj);
-    }
-    tmpDrawObj = null;
-    drawStart = null;
-  }
-};
-
-const onWheel = (opt) => {
-  const e = opt.e;
-  if (!e.ctrlKey && !e.metaKey) return;
-  e.preventDefault();
-  e.stopPropagation();
-  const delta = e.deltaY > 0 ? -1 : 1;
-  const z = Math.min(3, Math.max(0.2, zoom.value * Math.pow(1.1, delta)));
-  applyZoom(z);
-};
-
-// ---------- 选中与属性 ----------
-const onSelectionChange = (opt) => {
-  const objs = opt.selected || [];
-  if (objs.length !== 1) { selected.value = null; return; }
-  syncPropPanel(objs[0]);
-};
-const onSelectionClear = () => { selected.value = null; };
-
-const syncPropPanel = (obj) => {
-  const data = getObjData(obj);
-  selected.value = { obj, dataType: obj.dataType, data };
-  propX.value = Math.round(obj.left ?? 0);
-  propY.value = Math.round(obj.top ?? 0);
-  propRotation.value = Math.round(obj.angle || 0);
-  if (obj.dataType === 'area') {
-    propName.value = data.name || '';
-    propW.value = Math.round(obj.width * (obj.scaleX || 1));
-    propH.value = Math.round(obj.height * (obj.scaleY || 1));
-    propFill.value = obj.fill || '#667eea';
-    propStroke.value = obj.stroke || '#667eea';
-  } else if (obj.dataType === 'seat') {
-    propSeatNo.value = data.seatNo || '';
-    propSeatType.value = data.seatType || 1;
-    propAreaId.value = data.areaId ?? null;
-    propSeatStatus.value = data.status ?? 0;
-    const rect = obj.getObjects ? obj.getObjects()[0] : null;
-    propSeatSize.value = Math.round((rect ? rect.width : 44) * (obj.scaleX || 1));
-  } else if (obj.dataType === 'wall' || obj.dataType === 'path') {
-    propThickness.value = obj.strokeWidth || 8;
-    propColor.value = obj.stroke || '#888888';
-  } else if (obj.dataType === 'text') {
-    propContent.value = obj.text || '';
-    propFontSize.value = obj.fontSize || 24;
-    propColor.value = obj.fill || '#e8e8ec';
-  }
-};
-
-const applyProp = (key) => {
-  const obj = selected.value?.obj;
-  if (!obj) return;
-  const data = getObjData(obj);
-  switch (key) {
-    case 'x': obj.set({ left: propX.value }); break;
-    case 'y': obj.set({ top: propY.value }); break;
-    case 'rotation': obj.set({ angle: propRotation.value }); break;
-    case 'name': data.name = propName.value; break;
-    case 'w': obj.set({ width: propW.value, scaleX: 1 }); break;
-    case 'h': obj.set({ height: propH.value, scaleY: 1 }); break;
-    case 'fill': obj.set({ fill: propFill.value }); break;
-    case 'stroke': obj.set({ stroke: propStroke.value }); break;
-    case 'seatNo': {
-      data.seatNo = propSeatNo.value;
-      const label = obj.getObjects ? obj.getObjects()[1] : null;
-      if (label) label.set({ text: propSeatNo.value });
-      break;
-    }
-    case 'seatType': data.seatType = propSeatType.value; refreshSeatFill(obj); break;
-    case 'areaId': data.areaId = propAreaId.value; break;
-    case 'seatStatus': data.status = propSeatStatus.value; refreshSeatFill(obj); break;
-    case 'seatSize': {
-      const rect = obj.getObjects ? obj.getObjects()[0] : null;
-      if (rect) {
-        rect.set({ width: propSeatSize.value, height: propSeatSize.value });
-        const label = obj.getObjects ? obj.getObjects()[1] : null;
-        if (label) label.set({ width: propSeatSize.value, left: -propSeatSize.value / 2, top: -propSeatSize.value / 2 + 5 });
-        obj.set({ scaleX: 1, scaleY: 1 });
-      }
-      break;
-    }
-    case 'thickness': obj.set({ strokeWidth: propThickness.value }); break;
-    case 'color':
-      obj.set({ stroke: propColor.value });
-      if (obj.dataType === 'text') obj.set({ fill: propColor.value });
-      break;
-    case 'content': obj.set({ text: propContent.value }); data.content = propContent.value; break;
-    case 'fontSize': obj.set({ fontSize: propFontSize.value }); data.fontSize = propFontSize.value; break;
-  }
-  obj.setCoords();
-  canvas.requestRenderAll();
-  recordHistory();
-};
-// ---------- 座位 ----------
-const seatColor = (type) => {
-  return type === 2 ? '#3d6fd1' : type === 3 ? '#7a5cd6' : '#2f7d4f';
-};
-const refreshSeatFill = (group) => {
-  const rect = group.getObjects ? group.getObjects()[0] : null;
-  if (!rect) return;
-  const data = getObjData(group);
-  rect.set({ fill: data.status === 3 ? '#6b6b76' : seatColor(data.seatType) });
-};
-
-const nextSeatNo = () => {
-  const used = new Set();
-  canvas.getObjects().forEach(o => {
-    if (o.dataType === 'seat' && getObjData(o).seatNo) used.add(getObjData(o).seatNo);
-  });
-  let n = 1;
-  while (true) {
-    const no = floorNumber.value + '-' + String(n).padStart(2, '0');
-    if (!used.has(no)) return no;
-    n++;
-  }
-};
-
-const addSeatAt = (point) => {
-  const size = 44;
-  const seatNo = nextSeatNo();
-  const rect = new Rect({
-    left: 0, top: 0, width: size, height: size,
-    fill: seatColor(seatType.value), stroke: '#d8d8e0', strokeWidth: 2, rx: 6, ry: 6
-  });
-  const label = new Textbox(seatNo, {
-    left: -size / 2, top: -size / 2 + 5, width: size,
-    fontSize: 11, fill: '#ffffff', textAlign: 'center',
-    selectable: false, evented: false
-  });
-  const group = new Group([rect, label], {
-    left: Math.round(point.x - size / 2),
-    originX: 'left', originY: 'top',
-    top: Math.round(point.y - size / 2),
-    dataType: 'seat',
-    data: { id: uid('s'), seatId: null, seatNo, seatType: seatType.value, areaId: null, status: 0 }
-  });
-  canvas.add(group);
-  canvas.setActiveObject(group);
-  canvas.requestRenderAll();
-  recordHistory();
-};
-
-const addTextAt = (point) => {
-  const tb = new Textbox('双击编辑文字', {
-    left: point.x, top: point.y,
-    fontSize: 24, fill: '#e8e8ec', width: 180,
-    originX: 'left', originY: 'top',
-    dataType: 'text', data: { id: uid('t'), content: '双击编辑文字' }
-  });
-  canvas.add(tb);
-  canvas.setActiveObject(tb);
-  canvas.requestRenderAll();
-  recordHistory();
-};
-
-// ---------- 底图 ----------
-const handleBgUpload = (e) => {
-  const file = e.target.files?.[0];
-  e.target.value = '';
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const dataUrl = reader.result;
-    try {
-      const img = await FabricImage.fromURL(dataUrl);
-      const scale = Math.min(1, 2000 / img.width, 1400 / img.height);
-      const finalUrl = await compressImage(dataUrl, Math.round(img.width * scale), Math.round(img.height * scale));
-      const img2 = await FabricImage.fromURL(finalUrl);
-      sceneW = Math.max(sceneW, Math.round(img2.width));
-      sceneH = Math.max(sceneH, Math.round(img2.height));
-      img2.set({ left: 0, top: 0, originX: 'left', originY: 'top', selectable: false, evented: false, dataType: 'bg', data: { src: finalUrl } });
-      const oldBg = canvas.getObjects().find(o => o.dataType === 'bg');
-      if (oldBg) canvas.remove(oldBg);
-      canvas.add(img2);
-      img2.sendToBack();
-      bgImageSrc = finalUrl;
-      applySceneSize();
-      recordHistory();
-      toast('底图已上传', 'success');
-    } catch (err) {
-      toast('底图加载失败', 'error');
-    }
-  };
-  reader.readAsDataURL(file);
-};
-
-const compressImage = (dataUrl, w, h) => {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      c.getContext('2d').drawImage(img, 0, 0, w, h);
-      try { resolve(c.toDataURL('image/jpeg', 0.85)); }
-      catch (err) { resolve(dataUrl); }
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
-  });
-};
-
-// ---------- 删除 / 复制 ----------
-const deleteSelected = () => {
-  const objs = canvas.getActiveObjects();
-  if (!objs.length) return;
-  objs.forEach(o => canvas.remove(o));
-  canvas.discardActiveObject();
-  selected.value = null;
-  canvas.requestRenderAll();
-  recordHistory();
-};
-
-const duplicateSelected = () => {
-  const objs = canvas.getActiveObjects();
-  if (!objs.length) return;
-  const clones = [];
-  objs.forEach(o => {
-    const clone = o.clone();
-    clone.dataType = o.dataType;
-        clone.set({ left: (o.left || 0) + 30, top: (o.top || 0) + 30 });
-    const data = { ...getObjData(o), id: uid('o') };
-    if (o.dataType === 'seat') {
-      data.seatId = null;
-      data.seatNo = nextSeatNo();
-      clone.data = data;
-      const label = clone.getObjects ? clone.getObjects()[1] : null;
-      if (label) label.set({ text: data.seatNo });
-    } else {
-      clone.data = data;
-    }
-    clone.setCoords();
-    canvas.add(clone);
-    clones.push(clone);
-  });
-  canvas.discardActiveObject();
-  if (clones.length === 1) canvas.setActiveObject(clones[0]);
-  canvas.requestRenderAll();
-  recordHistory();
-};
-
-// ---------- 历史记录（撤销/重做） ----------
-const recordHistory = () => {
-  if (loadingLock) return;
-  if (historyTimer) clearTimeout(historyTimer);
-  historyTimer = setTimeout(() => {
-    const json = toBusinessJson();
-    historyStack = historyStack.slice(0, historyIndex + 1);
-    historyStack.push(json);
-    if (historyStack.length > 60) historyStack.shift();
-    historyIndex = historyStack.length - 1;
-  }, 200);
-};
-
-const undo = async () => {
-  if (historyIndex > 0) { historyIndex--; await loadBusinessJson(historyStack[historyIndex]); }
-};
-const redo = async () => {
-  if (historyIndex < historyStack.length - 1) { historyIndex++; await loadBusinessJson(historyStack[historyIndex]); }
-};
-// ---------- 业务 JSON 转换 ----------
-const toBusinessJson = () => {
-  const areasArr = [], walls = [], paths = [], seats = [], texts = [];
-  canvas.getObjects().forEach(o => {
-    if (o.dataType === 'area') {
-      const data = getObjData(o);
-      areasArr.push({
-        id: data.id, name: data.name || '', x: Math.round(o.left), y: Math.round(o.top),
-        w: Math.round(o.width * (o.scaleX || 1)), h: Math.round(o.height * (o.scaleY || 1)),
-        fill: o.fill, stroke: o.stroke
-      });
-    } else if (o.dataType === 'wall') {
-      const data = getObjData(o);
-      walls.push({
-        id: data.id, x1: Math.round(o.x1), y1: Math.round(o.y1),
-        x2: Math.round(o.x2), y2: Math.round(o.y2),
-        thickness: o.strokeWidth, color: o.stroke
-      });
-    } else if (o.dataType === 'path') {
-      const data = getObjData(o);
-      const pts = (o.path || []).map(p => [Math.round(p[p.length - 2]), Math.round(p[p.length - 1])]);
-      paths.push({ id: data.id, points: pts, color: o.stroke, thickness: o.strokeWidth });
-    } else if (o.dataType === 'seat') {
-      const data = getObjData(o);
-      const rect = o.getObjects ? o.getObjects()[0] : null;
-      seats.push({
-        id: data.id, seatId: data.seatId ?? null, seatNo: data.seatNo || '',
-        seatType: data.seatType ?? 1, areaId: data.areaId ?? null,
-        x: Math.round(o.left), y: Math.round(o.top),
-        w: Math.round((rect ? rect.width : 44) * (o.scaleX || 1)),
-        h: Math.round((rect ? rect.height : 44) * (o.scaleY || 1)),
-        rotation: Math.round(o.angle || 0),
-        status: data.status ?? 0
-      });
-    } else if (o.dataType === 'text') {
-      const data = getObjData(o);
-      texts.push({
-        id: data.id, content: o.text || '', x: Math.round(o.left), y: Math.round(o.top),
-        fontSize: o.fontSize, color: o.fill
-      });
-    }
-  });
-  return {
-    canvas: { width: sceneW, height: sceneH, bgImage: bgImageSrc },
-    areas: areasArr, walls, paths, seats, texts
-  };
-};
-
-const clearCanvas = async () => {
-  loadingLock = true;
-  canvas.clear();
-  applySceneSize();
-  fitAfterLoad();
-  bgImageSrc = '';
-  historyStack = [];
-  historyIndex = -1;
-  selected.value = null;
-  canvas.requestRenderAll();
-  loadingLock = false;
-};
-
-const loadBusinessJson = async (jsonStr) => {
-  loadingLock = true;
-  try {
-    const json = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
-    canvas.clear();
-    bgImageSrc = '';
-
-    const c = json.canvas || {};
-    if (c.width) sceneW = Number(c.width);
-    if (c.height) sceneH = Number(c.height);
-    if (c.bgImage) {
-      try {
-        const img = await FabricImage.fromURL(c.bgImage);
-        img.set({ left: 0, top: 0, originX: 'left', originY: 'top', selectable: false, evented: false, dataType: 'bg', data: { src: c.bgImage } });
-        canvas.add(img);
-        img.sendToBack();
-        bgImageSrc = c.bgImage;
-      } catch (e) {
-        console.warn('底图加载失败', e);
-      }
-    }
-
-    (json.areas || []).forEach(a => {
-      const rect = new Rect({
-        left: a.x, top: a.y, width: a.w, height: a.h,
-        fill: a.fill || 'rgba(102,126,234,0.38)', stroke: a.stroke || '#667eea',
-        originX: 'left', originY: 'top',
-        strokeWidth: 2, rx: 6, ry: 6,
-        dataType: 'area', data: { id: a.id || uid('a'), name: a.name || '' }
-      });
-      canvas.add(rect);
-    });
-
-    (json.walls || []).forEach(w => {
-      canvas.add(new Line([w.x1, w.y1, w.x2, w.y2], {
-        stroke: w.color || '#8a8a96', strokeWidth: w.thickness || 8,
-        originX: 'left', originY: 'top',
-        dataType: 'wall', data: { id: w.id || uid('w') }
-      }));
-    });
-
-    (json.paths || []).forEach(p => {
-      if (!p.points || !p.points.length) return;
-      const pathStr = p.points.map((pt, i) => (i === 0 ? 'M ' : 'L ') + pt[0] + ' ' + pt[1]).join(' ');
-      canvas.add(new Path(pathStr, {
-        stroke: p.color || '#999999', strokeWidth: p.thickness || 5, fill: '',
-        dataType: 'path', data: { id: p.id || uid('p') }
-      }));
-    });
-
-    (json.seats || []).forEach(s => {
-      const size = s.w || 44;
-      const rect = new Rect({
-        left: 0, top: 0, width: size, height: size,
-        fill: seatColor(s.seatType || 1), stroke: '#d8d8e0', strokeWidth: 2, rx: 6, ry: 6
-      });
-      const label = new Textbox(s.seatNo || '', {
-        left: -size / 2, top: -size / 2 + 5, width: size,
-        fontSize: 11, fill: '#ffffff', textAlign: 'center',
-        selectable: false, evented: false
-      });
-      const group = new Group([rect, label], {
-        left: s.x, top: s.y, angle: s.rotation || 0,
-        originX: 'left', originY: 'top',
-        dataType: 'seat',
-        data: { id: s.id || uid('s'), seatId: s.seatId ?? null, seatNo: s.seatNo || '', seatType: s.seatType || 1, areaId: s.areaId ?? null, status: s.status ?? 0 }
-      });
-      if (s.status === 3) refreshSeatFill(group);
-      canvas.add(group);
-    });
-
-    (json.texts || []).forEach(t => {
-      canvas.add(new Textbox(t.content || '', {
-        left: t.x, top: t.y, fontSize: t.fontSize || 24, fill: t.color || '#e8e8ec', width: 200,
-        originX: 'left', originY: 'top',
-        dataType: 'text', data: { id: t.id || uid('t'), content: t.content || '' }
-      }));
-    });
-
-    applySceneSize();
-    fitAfterLoad();
-    canvas.requestRenderAll();
-
-    historyStack = [json];
-    historyIndex = 0;
-  } catch (e) {
-    console.error('加载结构图失败', e);
-    toast('结构图加载失败', 'error');
-  } finally {
-    loadingLock = false;
-  }
-};
-// ---------- 保存 / 发布 ----------
-const handleSaveDraft = async () => {
-  if (!selectedFloorId.value) { toast('请先选择楼层', 'warning'); return; }
-  saving.value = true;
-  try {
-    await saveDraftLayout(selectedFloorId.value, JSON.stringify(toBusinessJson()));
-    toast('草稿已保存', 'success');
-  } catch (e) {
-    toast('保存失败: ' + (e.response?.data?.message || e.message || ''), 'error');
-  } finally {
-    saving.value = false;
-  }
-};
-
-const handlePublish = async () => {
-  if (!selectedFloorId.value) { toast('请先选择楼层', 'warning'); return; }
-  if (!confirm('发布后普通用户即可看到该楼层的结构图，座位数据将同步到数据库，确定发布吗？')) return;
-  saving.value = true;
-  try {
-    const res = await publishLayout(selectedFloorId.value, JSON.stringify(toBusinessJson()));
-    let data = res;
-    if (data?.code === 200) data = data.data;
-    const warnings = data?.warnings || [];
-    if (warnings && warnings.length) {
-      toast('发布成功，但有警告：' + warnings.join('；'), 'warning');
-    } else {
-      toast('发布成功！', 'success');
-    }
-    if (data?.layoutJson) {
-      await loadBusinessJson(data.layoutJson);
-    }
-  } catch (e) {
-    toast('发布失败: ' + (e.response?.data?.message || e.message || ''), 'error');
-  } finally {
-    saving.value = false;
-  }
-};
-
-// ---------- 键盘 ----------
-const onKeyDown = (e) => {
-  if (!canvas) return;
-  const tag = document.activeElement?.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-  if (e.code === 'Space') {
-    isSpaceDown = true;
-    canvas.defaultCursor = 'grab';
-    canvas.skipTargetFind = true;
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-    e.preventDefault();
-    if (e.shiftKey) redo(); else undo();
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
-    e.preventDefault();
-    duplicateSelected();
-  }
-  if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
-  const k = e.key.toLowerCase();
-  if (k === 'v') setMode('select');
-  if (k === 'h') setMode('pan');
-  if (k === 'p') setMode('path');
-  if (k === 't') setMode('text');
-};
-
-const onKeyUp = (e) => {
-  if (e.code === 'Space') {
-    isSpaceDown = false;
-    if (canvas) { canvas.defaultCursor = 'default'; canvas.skipTargetFind = false; }
-  }
-};
-
-const setMode = (m) => {
-  mode.value = m;
-  if (!canvas) return;
-  if (m === 'path') {
-    canvas.isDrawingMode = true;
-    canvas.selection = false;
-    canvas.skipTargetFind = true;
-    selected.value = null;
-  } else if (m === 'pan') {
-    canvas.isDrawingMode = false;
-    canvas.selection = false;
-    canvas.skipTargetFind = true;
-    canvas.defaultCursor = 'grab';
-    canvas.discardActiveObject();
-    selected.value = null;
   } else {
-    canvas.isDrawingMode = false;
-    canvas.selection = true;
-    canvas.skipTargetFind = false;
-    canvas.defaultCursor = 'default';
+    await loadAreaOptions()
   }
-};
+}
 
-const onObjectModified = () => {
-  if (selected.value) syncPropPanel(selected.value.obj);
-  recordHistory();
-};
-const onObjectAdded = (opt) => {
-  const obj = opt.target;
-  if (obj.type === 'path' && !obj.dataType && !tmpDrawObj) {
-    obj.set({ dataType: 'path', data: { id: uid('p') } });
-    recordHistory();
+const onCatalogChanged = () => {
+  refreshCatalog()
+}
+
+const handleFloorChange = async (e: Event) => {
+  const v = Number((e.target as HTMLSelectElement).value)
+  if (!Number.isFinite(v) || v === floorId.value) return
+  if (dirty.value && !window.confirm('当前楼层有未保存的修改，切换将丢弃，确定继续？')) {
+    ;(e.target as HTMLSelectElement).value = String(floorId.value ?? '')
+    return
   }
-};
-const onObjectRemoved = () => recordHistory();
+  floorId.value = v
+  await switchFloor()
+}
 
-// ---------- 生命周期 ----------
+// ============ 加载 / 保存 / 发布 ============
+const loadingLayout = ref(false)
+const saving = ref(false)
+const publishing = ref(false)
+const lastSavedJson = ref('')
+
+const dirty = computed(() => lastSavedJson.value !== JSON.stringify(doc.value))
+
+const loadLayout = async () => {
+  loadingLayout.value = true
+  selectedId.value = null
+  preview.value = null
+  try {
+    if (floorId.value == null) {
+      doc.value = emptyDoc()
+      lastSavedJson.value = JSON.stringify(doc.value)
+      return
+    }
+    const res = await getDraftLayout(floorId.value)
+    const layout = res && res.code === 200 ? res.data : null
+    if (layout && layout.layoutJson) {
+      doc.value = normalizeDoc(JSON.parse(layout.layoutJson) as Partial<EditorDoc>)
+    } else {
+      doc.value = emptyDoc()
+    }
+    lastSavedJson.value = JSON.stringify(doc.value)
+    resetHistory()
+    await nextTick()
+    fitView()
+  } catch (err) {
+    doc.value = emptyDoc()
+    lastSavedJson.value = JSON.stringify(doc.value)
+    toast('结构图加载失败：' + errMsg(err, '请重试'), 'error')
+  } finally {
+    loadingLayout.value = false
+  }
+}
+
+const reloadLayout = async () => {
+  if (dirty.value && !window.confirm('放弃当前未保存的修改并重新加载？')) return
+  await loadLayout()
+}
+
+const saveDraft = async () => {
+  if (floorId.value == null) {
+    toast('请先选择楼层', 'warning')
+    return
+  }
+  saving.value = true
+  try {
+    await saveDraftLayout(floorId.value, JSON.stringify(doc.value))
+    lastSavedJson.value = JSON.stringify(doc.value)
+    toast('✅ 草稿已保存', 'success')
+  } catch (err) {
+    toast('保存草稿失败：' + errMsg(err, '请重试'), 'error')
+  } finally {
+    saving.value = false
+  }
+}
+
+const publishNow = async () => {
+  if (floorId.value == null) {
+    toast('请先选择楼层', 'warning')
+    return
+  }
+  const dup = findDuplicateSeatNo()
+  if (dup) {
+    toast(`座位编号重复：${dup}，请先修改`, 'error')
+    return
+  }
+  const count = doc.value.seats.length
+  if (
+    !window.confirm(`确定发布「${floorName.value}」的结构图吗？` + `\n将同步 ${count} 个座位到座位表，学生端立即生效。`)
+  )
+    return
+  publishing.value = true
+  try {
+    const res = await publishLayout(floorId.value, JSON.stringify(doc.value))
+    const result = res && res.code === 200 ? res.data : null
+    if (!result) throw new Error('发布未返回结果')
+    if (result.layoutJson) {
+      doc.value = normalizeDoc(JSON.parse(result.layoutJson) as Partial<EditorDoc>)
+    }
+    lastSavedJson.value = JSON.stringify(doc.value)
+    resetHistory()
+    const warns = result.warnings || []
+    if (warns.length) {
+      toast(`⚠️ 已发布，但有 ${warns.length} 条提示：${warns[0]}`, 'warning')
+    } else {
+      toast('✅ 发布成功，座位已同步', 'success')
+    }
+    selectedId.value = null
+  } catch (err) {
+    toast('发布失败：' + errMsg(err, '请重试'), 'error')
+  } finally {
+    publishing.value = false
+  }
+}
+
+const findDuplicateSeatNo = (): string | null => {
+  const seen = new Set<string>()
+  for (const s of doc.value.seats) {
+    const no = String(s.seatNo || '')
+      .trim()
+      .toLowerCase()
+    if (!no) continue
+    if (seen.has(no)) return String(s.seatNo)
+    seen.add(no)
+  }
+  return null
+}
+
+const clearAll = () => {
+  if (!window.confirm('确定清空当前楼层的全部图形？清空后需重新绘制。')) return
+  commitHistory()
+  doc.value = emptyDoc()
+  selectedId.value = null
+}
+
+// ============ 撤销 / 重做 ============
+const undoStack = ref<string[]>([])
+const redoStack = ref<string[]>([])
+const canUndo = computed(() => undoStack.value.length > 0)
+const canRedo = computed(() => redoStack.value.length > 0)
+
+function resetHistory(): void {
+  undoStack.value = []
+  redoStack.value = []
+}
+
+function commitHistory(): void {
+  undoStack.value.push(JSON.stringify(doc.value))
+  if (undoStack.value.length > 80) undoStack.value.shift()
+  redoStack.value = []
+}
+
+let commitTimer: number | undefined
+function commitSoon(): void {
+  if (commitTimer) window.clearTimeout(commitTimer)
+  commitTimer = window.setTimeout(() => {
+    commitTimer = undefined
+    commitHistory()
+  }, 500)
+}
+
+function undo(): void {
+  const prev = undoStack.value.pop()
+  if (prev == null) return
+  redoStack.value.push(JSON.stringify(doc.value))
+  doc.value = JSON.parse(prev) as EditorDoc
+  selectedId.value = null
+}
+
+function redo(): void {
+  const next = redoStack.value.pop()
+  if (next == null) return
+  undoStack.value.push(JSON.stringify(doc.value))
+  doc.value = JSON.parse(next) as EditorDoc
+  selectedId.value = null
+}
+
+// ============ 视图（缩放 / 适应 / 平移） ============
+const zoom = ref(1)
+const viewportEl = ref<HTMLDivElement | null>(null)
+const svgEl = ref<SVGSVGElement | null>(null)
+const isSpaceDown = ref(false)
+const managerVisible = ref(false)
+
+function setZoom(z: number): void {
+  zoom.value = clamp(z, MIN_ZOOM, MAX_ZOOM)
+}
+const zoomIn = () => setZoom(zoom.value * 1.2)
+const zoomOut = () => setZoom(zoom.value / 1.2)
+const resetView = () => setZoom(1)
+function fitView(): void {
+  const vp = viewportEl.value
+  if (!vp) return
+  const pad = 48
+  const z = Math.min((vp.clientWidth - pad) / sceneW.value, (vp.clientHeight - pad) / sceneH.value, 1.2)
+  setZoom(Math.max(MIN_ZOOM, z))
+}
+
+function scenePoint(e: PointerEvent): { x: number; y: number } {
+  const svg = svgEl.value
+  if (!svg) return { x: 0, y: 0 }
+  const r = svg.getBoundingClientRect()
+  if (r.width <= 0 || r.height <= 0) return { x: 0, y: 0 }
+  return {
+    x: ((e.clientX - r.left) * sceneW.value) / r.width,
+    y: ((e.clientY - r.top) * sceneH.value) / r.height
+  }
+}
+
+// ============ 工具与绘制 ============
+type DragState =
+  | { mode: 'pan'; startClientX: number; startClientY: number; scrollLeft: number; scrollTop: number }
+  | {
+      mode: 'move'
+      kind: EditorKind
+      id: string
+      origin: MoveOrigin
+      startSceneX: number
+      startSceneY: number
+      moved: boolean
+    }
+  | { mode: 'draw'; tool: 'area' | 'wall' | 'path'; startSceneX: number; startSceneY: number }
+  | null
+
+interface MoveOrigin {
+  x?: number
+  y?: number
+  w?: number
+  h?: number
+  x1?: number
+  y1?: number
+  x2?: number
+  y2?: number
+  points?: number[][]
+}
+
+type PreviewShape =
+  | { kind: 'area'; x1: number; y1: number; x2: number; y2: number }
+  | { kind: 'wall'; x1: number; y1: number; x2: number; y2: number }
+  | { kind: 'path'; points: number[][] }
+
+const mode = ref<EditorTool>('select')
+const seatToolType = ref(1)
+const drag = ref<DragState>(null)
+const preview = ref<PreviewShape | null>(null)
+
+const tools: Array<{ id: EditorTool; icon: string; label: string; tip: string }> = [
+  { id: 'select', icon: '🖱️', label: '选择', tip: '点选 / 拖动对象' },
+  { id: 'area', icon: '▭', label: '区域', tip: '拖拽绘制区域' },
+  { id: 'seat', icon: '🪑', label: '座位', tip: '点击放置座位' },
+  { id: 'wall', icon: '〰', label: '墙体', tip: '拖拽绘制墙体' },
+  { id: 'path', icon: '✏️', label: '画笔', tip: '按住拖动画自由路径' },
+  { id: 'text', icon: 'T', label: '文字', tip: '点击添加文字' },
+  { id: 'pan', icon: '✋', label: '抓手', tip: '拖动平移画布' }
+]
+
+const previewRect = computed(() => {
+  const p = preview.value
+  if (!p || p.kind !== 'area') return { x: 0, y: 0, w: 0, h: 0 }
+  return normalizeRect(p.x1, p.y1, p.x2, p.y2)
+})
+
+function onSvgPointerDown(e: PointerEvent): void {
+  if (e.button !== 0) return
+  const pt = scenePoint(e)
+  // 平移
+  if (mode.value === 'pan' || isSpaceDown.value) {
+    const vp = viewportEl.value
+    drag.value = {
+      mode: 'pan',
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      scrollLeft: vp ? vp.scrollLeft : 0,
+      scrollTop: vp ? vp.scrollTop : 0
+    }
+    return
+  }
+  // 选择
+  if (mode.value === 'select') {
+    const hit = hitTest(pt.x, pt.y)
+    if (hit) {
+      selectedId.value = hit.id
+      drag.value = {
+        mode: 'move',
+        kind: hit.kind,
+        id: hit.id,
+        origin: snapshotMoveOrigin(hit.kind, hit.obj),
+        startSceneX: pt.x,
+        startSceneY: pt.y,
+        moved: false
+      }
+    } else {
+      selectedId.value = null
+    }
+    return
+  }
+  // 座位 / 文字：单击放置
+  if (mode.value === 'seat') {
+    placeSeat(pt)
+    return
+  }
+  if (mode.value === 'text') {
+    placeText(pt)
+    return
+  }
+  // 区域 / 墙体 / 画笔：拖拽绘制
+  const tool = mode.value as 'area' | 'wall' | 'path'
+  drag.value = { mode: 'draw', tool, startSceneX: pt.x, startSceneY: pt.y }
+  preview.value =
+    tool === 'path'
+      ? { kind: 'path', points: [[round1(pt.x), round1(pt.y)]] }
+      : { kind: tool, x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y }
+}
+
+function onWinPointerMove(e: PointerEvent): void {
+  const d = drag.value
+  if (!d) return
+  if (d.mode === 'pan') {
+    const vp = viewportEl.value
+    if (vp) {
+      vp.scrollLeft = d.scrollLeft - (e.clientX - d.startClientX)
+      vp.scrollTop = d.scrollTop - (e.clientY - d.startClientY)
+    }
+    return
+  }
+  const pt = scenePoint(e)
+  if (d.mode === 'move') {
+    const dx = pt.x - d.startSceneX
+    const dy = pt.y - d.startSceneY
+    if (!d.moved && Math.hypot(dx, dy) > 3) d.moved = true
+    if (d.moved) applyMove(d.kind, d.id, d.origin, dx, dy)
+    return
+  }
+  if (d.mode === 'draw' && preview.value) {
+    const px = clamp(round1(pt.x), 0, sceneW.value)
+    const py = clamp(round1(pt.y), 0, sceneH.value)
+    if (preview.value.kind === 'path') {
+      const pts = preview.value.points
+      const last = pts[pts.length - 1]
+      if (last && Math.hypot(px - last[0], py - last[1]) >= 5) pts.push([px, py])
+    } else {
+      preview.value.x2 = px
+      preview.value.y2 = py
+    }
+  }
+}
+
+function onWinPointerUp(): void {
+  const d = drag.value
+  drag.value = null
+  if (!d) return
+  if (d.mode === 'move') {
+    if (d.moved) commitHistory()
+    return
+  }
+  if (d.mode === 'draw') finalizeDraw()
+}
+
+function onWinPointerCancel(): void {
+  drag.value = null
+  preview.value = null
+}
+
+function snapshotMoveOrigin(kind: EditorKind, obj: EditableNode): MoveOrigin {
+  switch (kind) {
+    case 'area': {
+      const o = obj as LayoutAreaShape
+      return { x: o.x, y: o.y, w: o.w, h: o.h }
+    }
+    case 'seat': {
+      const o = obj as LayoutSeatShape
+      return { x: o.x, y: o.y, w: o.w, h: o.h }
+    }
+    case 'wall': {
+      const o = obj as LayoutWallShape
+      return { x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2 }
+    }
+    case 'path': {
+      const o = obj as LayoutPathShape
+      return { points: (o.points || []).map((p) => [p[0], p[1]]) }
+    }
+    case 'text': {
+      const o = obj as LayoutTextShape
+      return { x: o.x, y: o.y }
+    }
+  }
+}
+
+function applyMove(kind: EditorKind, id: string, origin: MoveOrigin, dx: number, dy: number): void {
+  const node = findNode(id)
+  if (!node) return
+  if (kind === 'area') {
+    const o = node.obj as LayoutAreaShape
+    const pos = clampRectToScene(
+      (origin.x || 0) + dx,
+      (origin.y || 0) + dy,
+      o.w || 1,
+      o.h || 1,
+      sceneW.value,
+      sceneH.value
+    )
+    o.x = pos.x
+    o.y = pos.y
+  } else if (kind === 'seat') {
+    const o = node.obj as LayoutSeatShape
+    const w = o.w || 44
+    const h = o.h || 44
+    const pos = clampRectToScene((origin.x || 0) + dx, (origin.y || 0) + dy, w, h, sceneW.value, sceneH.value)
+    o.x = pos.x
+    o.y = pos.y
+  } else if (kind === 'text') {
+    const o = node.obj as LayoutTextShape
+    o.x = clamp(round1((origin.x || 0) + dx), 0, sceneW.value)
+    o.y = clamp(round1((origin.y || 0) + dy), 0, sceneH.value)
+  } else if (kind === 'wall') {
+    const o = node.obj as LayoutWallShape
+    o.x1 = clamp(round1((origin.x1 || 0) + dx), 0, sceneW.value)
+    o.y1 = clamp(round1((origin.y1 || 0) + dy), 0, sceneH.value)
+    o.x2 = clamp(round1((origin.x2 || 0) + dx), 0, sceneW.value)
+    o.y2 = clamp(round1((origin.y2 || 0) + dy), 0, sceneH.value)
+  } else if (kind === 'path') {
+    const o = node.obj as LayoutPathShape
+    o.points = (origin.points || []).map((p) => [
+      clamp(round1(p[0] + dx), 0, sceneW.value),
+      clamp(round1(p[1] + dy), 0, sceneH.value)
+    ])
+  }
+}
+
+function finalizeDraw(): void {
+  const p = preview.value
+  preview.value = null
+  if (!p) return
+  if (p.kind === 'area') {
+    const r = normalizeRect(p.x1, p.y1, p.x2, p.y2)
+    if (r.w < 10 || r.h < 10) return
+    const area: LayoutAreaShape = {
+      id: uid('a'),
+      x: round1(r.x),
+      y: round1(r.y),
+      w: round1(r.w),
+      h: round1(r.h),
+      name: '',
+      fill: areaDefaultFill(),
+      stroke: areaDefaultStroke()
+    }
+    doc.value.areas.push(area)
+    selectedId.value = area.id
+    commitHistory()
+  } else if (p.kind === 'wall') {
+    if (Math.hypot(p.x2 - p.x1, p.y2 - p.y1) < 8) return
+    const wall: LayoutWallShape = {
+      id: uid('w'),
+      x1: round1(p.x1),
+      y1: round1(p.y1),
+      x2: round1(p.x2),
+      y2: round1(p.y2),
+      color: '#8a8a96',
+      thickness: 8
+    }
+    doc.value.walls.push(wall)
+    selectedId.value = wall.id
+    commitHistory()
+  } else if (p.kind === 'path') {
+    const pts = (p.points || []).map((pt) => [round1(pt[0]), round1(pt[1])])
+    if (pts.length < 2) return
+    const path: LayoutPathShape = {
+      id: uid('p'),
+      points: pts,
+      color: '#999999',
+      thickness: 5
+    }
+    doc.value.paths.push(path)
+    selectedId.value = path.id
+    commitHistory()
+  }
+}
+
+function placeSeat(pt: { x: number; y: number }): void {
+  if (floorId.value == null) {
+    toast('请先选择楼层', 'warning')
+    return
+  }
+  const size = 44
+  const pos = clampRectToScene(pt.x - size / 2, pt.y - size / 2, size, size, sceneW.value, sceneH.value)
+  const seat: LayoutSeatShape = {
+    id: uid('s'),
+    seatNo: nextSeatNo(floorNumber.value, doc.value.seats),
+    x: pos.x,
+    y: pos.y,
+    w: size,
+    h: size,
+    rotation: 0,
+    seatType: seatToolType.value,
+    status: 0
+  }
+  doc.value.seats.push(seat)
+  selectedId.value = seat.id
+  commitHistory()
+}
+
+function placeText(pt: { x: number; y: number }): void {
+  const text: LayoutTextShape = {
+    id: uid('t'),
+    x: clamp(round1(pt.x), 0, sceneW.value),
+    y: clamp(round1(pt.y), 0, sceneH.value),
+    content: '双击区域或座位可设置名称/编号（见右侧面板）',
+    fontSize: 22,
+    color: '#e6e6ee'
+  }
+  doc.value.texts.push(text)
+  selectedId.value = text.id
+  commitHistory()
+}
+
+// ============ 命中测试与选择 ============
+function findNode(id: string): { kind: EditorKind; obj: EditableNode } | null {
+  for (const s of doc.value.seats) if (s.id === id) return { kind: 'seat', obj: s }
+  for (const t of doc.value.texts) if (t.id === id) return { kind: 'text', obj: t }
+  for (const p of doc.value.paths) if (p.id === id) return { kind: 'path', obj: p }
+  for (const w of doc.value.walls) if (w.id === id) return { kind: 'wall', obj: w }
+  for (const a of doc.value.areas) if (a.id === id) return { kind: 'area', obj: a }
+  return null
+}
+
+function hitTest(px: number, py: number): { kind: EditorKind; id: string; obj: EditableNode } | null {
+  // 座位（最上层先命中）
+  for (let i = doc.value.seats.length - 1; i >= 0; i--) {
+    const s = doc.value.seats[i]
+    if (pointInRect(px, py, s.x, s.y, s.w || 44, s.h || 44, s.rotation || 0)) {
+      return { kind: 'seat', id: s.id, obj: s }
+    }
+  }
+  for (let i = doc.value.texts.length - 1; i >= 0; i--) {
+    const t = doc.value.texts[i]
+    const b = boundsOf('text', t)
+    if (b && px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+      return { kind: 'text', id: t.id, obj: t }
+    }
+  }
+  for (let i = doc.value.paths.length - 1; i >= 0; i--) {
+    const p = doc.value.paths[i]
+    if (pointOnPolyline(px, py, p.points || [], Math.max(6, p.thickness || 5) / 2)) {
+      return { kind: 'path', id: p.id, obj: p }
+    }
+  }
+  for (let i = doc.value.walls.length - 1; i >= 0; i--) {
+    const w = doc.value.walls[i]
+    if (distToSegmentLite(px, py, w.x1, w.y1, w.x2, w.y2) <= Math.max(6, (w.thickness || 8) / 2)) {
+      return { kind: 'wall', id: w.id, obj: w }
+    }
+  }
+  for (let i = doc.value.areas.length - 1; i >= 0; i--) {
+    const a = doc.value.areas[i]
+    if (px >= a.x && px <= a.x + a.w && py >= a.y && py <= a.y + a.h) {
+      return { kind: 'area', id: a.id, obj: a }
+    }
+  }
+  return null
+}
+
+const selectedId = ref<string | null>(null)
+const selectedNode = computed(() => (selectedId.value ? findNode(selectedId.value) : null))
+const panelNode = computed(() => {
+  const n = selectedNode.value
+  return n ? { kind: n.kind, obj: n.obj } : null
+})
+const selBox = computed(() => {
+  const n = selectedNode.value
+  if (!n) return null
+  return boundsOf(n.kind, n.obj)
+})
+
+function deleteSelected(): void {
+  const n = selectedNode.value
+  if (!n) return
+  const id = (n.obj as { id: string }).id
+  if (n.kind === 'area') doc.value.areas = doc.value.areas.filter((x) => x.id !== id)
+  else if (n.kind === 'wall') doc.value.walls = doc.value.walls.filter((x) => x.id !== id)
+  else if (n.kind === 'path') doc.value.paths = doc.value.paths.filter((x) => x.id !== id)
+  else if (n.kind === 'text') doc.value.texts = doc.value.texts.filter((x) => x.id !== id)
+  else if (n.kind === 'seat') doc.value.seats = doc.value.seats.filter((x) => x.id !== id)
+  selectedId.value = null
+  commitHistory()
+}
+
+// 属性面板变更
+function onPropChange(key: string, value: string | number | null): void {
+  const n = selectedNode.value
+  if (!n) return
+  const str = (v: string | number | null): string => String(v ?? '')
+  const num = (v: string | number | null, fb = 0): number => {
+    const x = Number(v)
+    return Number.isFinite(x) ? x : fb
+  }
+  if (n.kind === 'area') {
+    const a = n.obj as LayoutAreaShape
+    if (key === 'name') a.name = str(value)
+    else if (key === 'fill') a.fill = str(value) || undefined
+    else if (key === 'stroke') a.stroke = str(value) || undefined
+    else if (key === 'x') a.x = clamp(num(value), 0, sceneW.value)
+    else if (key === 'y') a.y = clamp(num(value), 0, sceneH.value)
+    else if (key === 'w') a.w = Math.max(10, num(value, 10))
+    else if (key === 'h') a.h = Math.max(10, num(value, 10))
+  } else if (n.kind === 'seat') {
+    const s = n.obj as LayoutSeatShape
+    if (key === 'seatNo') {
+      const no = str(value).trim()
+      if (isSeatNoDuplicate(no, s.id, doc.value.seats)) {
+        toast('该座位编号已存在', 'warning')
+        return
+      }
+      s.seatNo = no
+    } else if (key === 'seatType') s.seatType = num(value, 1)
+    else if (key === 'areaId') s.areaId = value == null || value === '' ? null : num(value)
+    else if (key === 'status') s.status = num(value, 0)
+    else if (key === 'rotation') s.rotation = clamp(num(value), -180, 180)
+    else if (key === 'size') {
+      const v = Math.max(20, Math.min(120, num(value, 44)))
+      s.w = v
+      s.h = v
+    } else if (key === 'x')
+      s.x = clampRectToScene(num(value), s.y || 0, s.w || 44, s.h || 44, sceneW.value, sceneH.value).x
+    else if (key === 'y')
+      s.y = clampRectToScene(s.x || 0, num(value), s.w || 44, s.h || 44, sceneW.value, sceneH.value).y
+  } else if (n.kind === 'wall') {
+    const w = n.obj as LayoutWallShape
+    if (key === 'color') w.color = str(value) || undefined
+    else if (key === 'thickness') w.thickness = Math.max(1, num(value, 8))
+  } else if (n.kind === 'path') {
+    const p = n.obj as LayoutPathShape
+    if (key === 'color') p.color = str(value) || undefined
+    else if (key === 'thickness') p.thickness = Math.max(1, num(value, 5))
+  } else if (n.kind === 'text') {
+    const t = n.obj as LayoutTextShape
+    if (key === 'content') t.content = str(value)
+    else if (key === 'fontSize') t.fontSize = Math.max(8, num(value, 24))
+    else if (key === 'color') t.color = str(value) || undefined
+    else if (key === 'x') t.x = clamp(num(value), 0, sceneW.value)
+    else if (key === 'y') t.y = clamp(num(value), 0, sceneH.value)
+  }
+  commitSoon()
+}
+
+// ============ 底图 ============
+const bgFileEl = ref<HTMLInputElement | null>(null)
+const pickBg = () => bgFileEl.value?.click()
+
+async function onBgFile(e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    toast('请选择图片文件', 'warning')
+    return
+  }
+  try {
+    const dataUrl = await fileToDataUrl(file)
+    const resized = await compressImage(dataUrl, 2000)
+    doc.value.canvas = { ...(doc.value.canvas || {}), width: sceneW.value, height: sceneH.value, bgImage: resized }
+    toast('✅ 底图已设置', 'success')
+    commitHistory()
+  } catch (err) {
+    toast('底图处理失败：' + errMsg(err, '图片可能过大'), 'error')
+  }
+}
+
+const removeBg = () => {
+  doc.value.canvas = { ...(doc.value.canvas || {}), bgImage: '' }
+  commitHistory()
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('图片加载失败'))
+    img.src = src
+  })
+}
+
+async function compressImage(src: string, maxDim: number): Promise<string> {
+  const img = await loadImage(src)
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
+  const w = Math.max(1, Math.round(img.width * scale))
+  const h = Math.max(1, Math.round(img.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return src
+  ctx.drawImage(img, 0, 0, w, h)
+  return canvas.toDataURL('image/jpeg', 0.85)
+}
+
+// ============ 工具函数 ============
+const polyPoints = (points?: number[][]): string => (points || []).map((p) => p.join(',')).join(' ')
+
+function distToSegmentLite(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return Math.hypot(px - x1, py - y1)
+  const t = clamp(((px - x1) * dx + (py - y1) * dy) / lenSq, 0, 1)
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
+}
+
+function errMsg(err: unknown, fallback: string): string {
+  const e = err as ApiErrorShape
+  return e?.response?.data?.message || e?.message || fallback
+}
+
+// ============ 键盘 ============
+function isTypingTarget(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null
+  if (!el) return false
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
+}
+
+function onKeyDown(e: KeyboardEvent): void {
+  const typing = isTypingTarget(e.target)
+  if (e.code === 'Space' && !typing) {
+    isSpaceDown.value = true
+    e.preventDefault()
+  }
+  if (typing) return
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault()
+    if (e.shiftKey) redo()
+    else undo()
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+    e.preventDefault()
+    redo()
+    return
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault()
+    deleteSelected()
+    return
+  }
+  if (e.key === 'Escape') {
+    selectedId.value = null
+    if (mode.value !== 'select') mode.value = 'select'
+  }
+}
+
+function onKeyUp(e: KeyboardEvent): void {
+  if (e.code === 'Space') {
+    isSpaceDown.value = false
+    if (drag.value && drag.value.mode === 'pan') drag.value = null
+  }
+}
+
+// ============ 生命周期 ============
 onMounted(async () => {
-  initCanvas();
-  await loadFloors();
-});
+  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('pointermove', onWinPointerMove)
+  window.addEventListener('pointerup', onWinPointerUp)
+  window.addEventListener('pointercancel', onWinPointerCancel)
+  await loadFloors()
+})
 
 onBeforeUnmount(() => {
-  disposeCanvas();
-});
+  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('pointermove', onWinPointerMove)
+  window.removeEventListener('pointerup', onWinPointerUp)
+  window.removeEventListener('pointercancel', onWinPointerCancel)
+})
 </script>
 <style scoped>
-.layout-editor {
+.floor-editor {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 73px);
+  height: 100%;
+  min-height: 540px;
   background: var(--bg-primary, #0d0d12);
-  color: var(--text-primary, #e8e8ec);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+  border-radius: 14px;
+  overflow: hidden;
 }
-.editor-topbar {
+
+/* ---- 顶栏 ---- */
+.fe-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.12));
-  background: var(--sidebar-bg, #16161c);
-  flex-shrink: 0;
-  gap: 12px;
   flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  background: var(--bg-glass-header, rgba(13, 13, 18, 0.6));
 }
-.topbar-left { display: flex; align-items: center; gap: 10px; }
-.topbar-label { font-size: 13px; color: var(--text-secondary, #9a9aa5); }
-.floor-select {
-  background: var(--sidebar-hover, rgba(255,255,255,0.08));
-  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
-  color: var(--text-primary, #e8e8ec);
-  padding: 6px 10px;
-  border-radius: 8px;
-  font-size: 14px;
-}
-.topbar-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.tb-btn {
-  background: var(--sidebar-hover, rgba(255,255,255,0.08));
-  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
-  color: var(--text-primary, #e8e8ec);
-  padding: 6px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  transition: all 0.2s;
-}
-.tb-btn:hover:not(:disabled) { background: var(--sidebar-active, rgba(102,126,234,0.25)); }
-.tb-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.tb-btn.primary { background: linear-gradient(135deg, #667eea, #764ba2); border: none; color: #fff; }
-.tb-btn.publish { background: linear-gradient(135deg, #2ecc71, #27ae60); border: none; color: #fff; }
-.tb-sep { width: 1px; height: 22px; background: var(--border-color, rgba(255,255,255,0.12)); margin: 0 4px; }
-.tb-zoom { font-size: 13px; color: var(--text-secondary, #9a9aa5); min-width: 46px; text-align: center; }
-
-.editor-body { display: flex; flex: 1; min-height: 0; }
-.tool-panel {
-  width: 92px;
-  background: var(--sidebar-bg, #16161c);
-  border-right: 1px solid var(--border-color, rgba(255,255,255,0.12));
-  padding: 12px 8px;
-  overflow-y: auto;
-  flex-shrink: 0;
+.fe-bar-sec {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.tool-group { display: flex; flex-direction: column; gap: 4px; }
-.tool-divider { height: 1px; background: var(--border-color, rgba(255,255,255,0.12)); margin: 4px 0; }
-.tool-btn {
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 8px 4px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  background: none;
-  color: var(--text-secondary, #9a9aa5);
-  cursor: pointer;
-  transition: all 0.2s;
+  gap: 4px;
+}
+.fe-label {
   font-size: 12px;
-}
-.tool-btn:hover { background: var(--sidebar-hover, rgba(255,255,255,0.08)); color: var(--text-primary, #e8e8ec); }
-.tool-btn.active { background: var(--sidebar-active, rgba(102,126,234,0.25)); color: #fff; border-color: rgba(102,126,234,0.5); }
-.tool-btn.danger:hover { background: rgba(244,67,54,0.2); color: #f44336; }
-.tool-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.tool-icon { font-size: 20px; }
-.tool-name { font-size: 11px; }
-.upload-btn { position: relative; overflow: hidden; }
-.hidden-file { display: none; }
-.seat-type-row { padding: 2px 0 6px; }
-.mini-select {
-  width: 100%;
-  background: var(--sidebar-hover, rgba(255,255,255,0.08));
-  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
-  color: var(--text-primary, #e8e8ec);
-  border-radius: 6px;
-  padding: 3px 2px;
-  font-size: 11px;
-}
-.tool-hint {
-  margin-top: auto;
-  font-size: 11px;
   color: var(--text-secondary, #9a9aa5);
-  line-height: 1.7;
-  padding: 8px 4px;
-  border-top: 1px solid var(--border-color, rgba(255,255,255,0.12));
+  margin-right: 4px;
 }
-.tool-hint p { margin: 0; }
-
-.canvas-wrap {
-  flex: 1;
-  overflow: auto;
-  padding: 16px;
-  position: relative;
+.fe-select {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.16));
+  border-radius: 8px;
+  color: var(--text-primary, #e8e8ec);
+  font-size: 13px;
+  padding: 5px 8px;
+  max-width: 160px;
+}
+.fe-select.seat-type {
+  max-width: 90px;
+}
+.fe-tools {
   display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
 }
-.canvas-empty {
+.fe-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary, #9a9aa5);
+  border-radius: 8px;
+  font-size: 13px;
+  padding: 5px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.fe-tool:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary, #e8e8ec);
+}
+.fe-tool.active {
+  background: rgba(102, 126, 234, 0.28);
+  border-color: rgba(102, 126, 234, 0.7);
+  color: #fff;
+}
+.fe-tool-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+.fe-btn {
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.16));
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #e8e8ec);
+  border-radius: 8px;
+  font-size: 13px;
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.fe-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+.fe-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.fe-btn.danger {
+  color: #f2554a;
+}
+.fe-btn.danger:hover:not(:disabled) {
+  background: rgba(244, 67, 54, 0.16);
+}
+.fe-btn.primary {
+  background: linear-gradient(135deg, #5b6cff, #7a4dff);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+.fe-btn.primary:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+.fe-btn.ghost {
+  background: transparent;
+}
+.fe-zoom {
+  font-size: 12px;
+  color: var(--text-secondary, #9a9aa5);
+  min-width: 44px;
+  text-align: center;
+}
+.fe-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-color, rgba(255, 255, 255, 0.16));
+  margin: 0 2px;
+}
+.fe-hidden {
+  display: none;
+}
+
+/* ---- 主体 ---- */
+.fe-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.fe-viewport {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.045) 1px, transparent 0) 0 0 / 24px 24px,
+    var(--bg-primary, #0d0d12);
+}
+.fe-svg {
+  display: block;
+  cursor: crosshair;
+}
+.fe-bg {
+  fill: #15151c;
+}
+.fe-svg text {
+  user-select: none;
+}
+.fe-area-name {
+  font-size: 18px;
+  font-weight: 600;
+  fill: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+.fe-text {
+  user-select: none;
+}
+.fe-seat-no {
+  fill: #fff;
+  font-weight: 600;
+  pointer-events: none;
+}
+.fe-preview {
+  pointer-events: none;
+}
+.fe-selbox {
+  fill: none;
+  stroke: #7ec8ff;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+.fe-overlay {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  pointer-events: none;
   color: var(--text-secondary, #9a9aa5);
-  font-size: 16px;
-}
-.canvas-wrap :deep(canvas) {
-  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
-  border-radius: 4px;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.4);
-}
-/* 网格与底色只应用于 lower-canvas（真正的内容渲染层），避免遮挡 */
-.canvas-wrap :deep(canvas.lower-canvas) {
-  background-image:
-    linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
-  background-size: 24px 24px;
-  background-color: #12121a;
-}
-/* upper-canvas 覆盖在内容层之上，必须保持透明，否则会挡住所有图形 */
-.canvas-wrap :deep(canvas.upper-canvas) {
-  background: transparent;
-}
-
-.prop-panel {
-  width: 240px;
-  background: var(--sidebar-bg, #16161c);
-  border-left: 1px solid var(--border-color, rgba(255,255,255,0.12));
-  padding: 14px;
-  overflow-y: auto;
-  flex-shrink: 0;
-}
-.prop-empty { color: var(--text-secondary, #9a9aa5); font-size: 13px; text-align: center; margin-top: 40px; }
-.prop-empty p { margin: 4px 0; }
-.prop-sub { font-size: 12px; opacity: 0.8; }
-.prop-title { margin: 0 0 12px; font-size: 14px; color: var(--text-primary, #e8e8ec); }
-.prop-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 8px; }
-.prop-row label { font-size: 12px; color: var(--text-secondary, #9a9aa5); flex-shrink: 0; min-width: 44px; }
-.prop-row input[type='text'],
-.prop-row input[type='number'],
-.prop-row select {
-  flex: 1;
-  min-width: 0;
-  background: var(--sidebar-hover, rgba(255,255,255,0.08));
-  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
-  color: var(--text-primary, #e8e8ec);
-  padding: 5px 8px;
-  border-radius: 6px;
   font-size: 13px;
 }
-.prop-row input[type='color'] {
-  width: 44px; height: 28px; padding: 2px;
-  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
-  border-radius: 6px; background: none; cursor: pointer;
+.fe-hint {
+  font-size: 14px;
+  padding-top: 90px;
+  align-items: flex-start;
 }
-.prop-sep { height: 1px; background: var(--border-color, rgba(255,255,255,0.12)); margin: 10px 0; }
-.prop-note { font-size: 11px; color: #f39c12; margin-top: 8px; line-height: 1.5; }
+
+/* 空面板提示 */
+.fe-panel-empty {
+  width: 252px;
+  flex: 0 0 auto;
+  border-left: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  background: var(--bg-glass, rgba(13, 13, 18, 0.55));
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text-secondary, #9a9aa5);
+  line-height: 1.8;
+}
+.fe-panel-empty p {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8ec);
+}
+.fe-panel-empty ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+.fe-dirty {
+  color: #ffb84d !important;
+  font-size: 12px;
+}
 </style>

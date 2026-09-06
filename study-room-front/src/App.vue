@@ -5,8 +5,8 @@
   <router-view />
 </template>
 
-<script setup>
-import ParticlesBackground from '@/components/ParticlesBackground.vue';
+<script setup lang="ts">
+import ParticlesBackground from '@/components/ParticlesBackground.vue'
 </script>
 
 <style scoped>
