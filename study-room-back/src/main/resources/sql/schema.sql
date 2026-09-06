@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS `sys_user` (
   `id_card`             VARCHAR(18)  DEFAULT NULL COMMENT '身份证号(用于生成初始密码)',
   `is_first_login`      TINYINT      NOT NULL DEFAULT 1 COMMENT '是否首次登录: 0-否 1-是',
   `password_updated_at` DATETIME     DEFAULT NULL COMMENT '密码最后更新时间',
+  `points`              INT          NOT NULL DEFAULT 500 COMMENT '信用积分(初始500，违约一次扣100)',
+  `book_ban_until`      DATETIME     DEFAULT NULL COMMENT '积分扣至0后的禁止预约截止时间(24小时)',
   `create_time`         DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time`         DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   `is_deleted`          TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',

@@ -72,6 +72,39 @@ public class StudyRoomController {
         return Result.success(seatService.getSeats(floorId, areaId, date, getCurrentUserId()));
     }
 
+    // ============ 楼层管理（管理员） ============
+
+    /**
+     * 新增楼层（仅管理员，自定义名称与排序号）
+     */
+    @PostMapping("/admin/floors")
+    @RequireRole(role = 1)
+    public Result<Void> addFloor(@RequestBody Floor floor) {
+        floorService.createFloor(floor);
+        return Result.success("楼层创建成功");
+    }
+
+    /**
+     * 更新楼层（仅管理员，可改名 / 调整排序 / 启停用）
+     */
+    @PutMapping("/admin/floors/{floorId}")
+    @RequireRole(role = 1)
+    public Result<Void> updateFloor(@PathVariable Long floorId, @RequestBody Floor floor) {
+        floor.setId(floorId);
+        floorService.updateFloor(floor);
+        return Result.success("楼层更新成功");
+    }
+
+    /**
+     * 删除楼层（仅管理员，需先清空其下区域 / 座位 / 结构图）
+     */
+    @DeleteMapping("/admin/floors/{floorId}")
+    @RequireRole(role = 1)
+    public Result<Void> deleteFloor(@PathVariable Long floorId) {
+        floorService.deleteFloor(floorId);
+        return Result.success("楼层删除成功");
+    }
+
     // ============ 区域管理（管理员） ============
 
     /**
@@ -79,9 +112,9 @@ public class StudyRoomController {
      */
     @PostMapping("/admin/areas")
     @RequireRole(role = 1)
-    public Result<Void> addArea(@Valid @RequestBody Area area) {
-        areaService.save(area);
-        return Result.success("添加区域成功");
+    public Result<Void> addArea(@RequestBody Area area) {
+        areaService.createArea(area);
+        return Result.success("区域创建成功");
     }
 
     /**
@@ -91,8 +124,8 @@ public class StudyRoomController {
     @RequireRole(role = 1)
     public Result<Void> updateArea(@PathVariable Long areaId, @RequestBody Area area) {
         area.setId(areaId);
-        areaService.updateById(area);
-        return Result.success("更新区域成功");
+        areaService.updateArea(area);
+        return Result.success("区域更新成功");
     }
 
     /**
@@ -101,8 +134,8 @@ public class StudyRoomController {
     @DeleteMapping("/admin/areas/{areaId}")
     @RequireRole(role = 1)
     public Result<Void> deleteArea(@PathVariable Long areaId) {
-        areaService.removeById(areaId);
-        return Result.success("删除区域成功");
+        areaService.deleteArea(areaId);
+        return Result.success("区域删除成功");
     }
 
     // ============ 座位管理 ============

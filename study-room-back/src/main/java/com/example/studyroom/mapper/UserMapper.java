@@ -14,16 +14,16 @@ public interface UserMapper extends BaseMapper<User> {
     /**
      * 查询已被逻辑删除的同名用户（绕过 @TableLogic，用于"重建"被删除用户）
      */
-    @Select("SELECT * FROM sys_user WHERE username = #{username} AND is_deleted = 1 LIMIT 1")
+@Select("SELECT * FROM sys_user WHERE username = #{username} AND is_deleted = 1 LIMIT 1")
     User selectDeletedByUsername(@Param("username") String username);
 
     /**
      * 重建被删除的用户（绕过 @TableLogic，直接更新已删除行并恢复 is_deleted=0）
      */
-    @Update("UPDATE sys_user SET username = #{username}, password = #{password}, role = #{role}, "
+@Update("UPDATE sys_user SET username = #{username}, password = #{password}, role = #{role}, "
             + "status = #{status}, id_card = #{idCard}, is_first_login = #{isFirstLogin}, "
-            + "password_updated_at = #{passwordUpdatedAt}, create_time = #{createTime}, "
-            + "update_time = #{updateTime}, is_deleted = 0 "
+            + "password_updated_at = #{passwordUpdatedAt}, points = #{points}, book_ban_until = #{bookBanUntil}, "
+            + "create_time = #{createTime}, update_time = #{updateTime}, is_deleted = 0 "
             + "WHERE id = #{id} AND is_deleted = 1")
     int rebuildUser(User user);
 }

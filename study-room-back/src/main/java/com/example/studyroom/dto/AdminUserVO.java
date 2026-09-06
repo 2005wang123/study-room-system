@@ -24,5 +24,11 @@ public class AdminUserVO {
 
     private Boolean isFirstLogin;
 
+    /** 信用积分（初始500） */
+    private Integer points;
+
+    /** 积分扣至0后的禁约截止时间 */
+    private LocalDateTime bookBanUntil;
+
     private LocalDateTime createTime;
 }

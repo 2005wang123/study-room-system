@@ -13,6 +13,7 @@ import com.example.studyroom.mapper.ReservationMapper;
 import com.example.studyroom.mapper.SeatMapper;
 import com.example.studyroom.mapper.UserMapper;
 import com.example.studyroom.service.ISeatService;
+import com.example.studyroom.service.IUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,7 @@ public class SeatServiceImpl extends ServiceImpl<SeatMapper, Seat> implements IS
     private final SeatMapper seatMapper;
     private final ReservationMapper reservationMapper;
     private final UserMapper userMapper;
+    private final IUserService userService;
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
@@ -166,6 +168,9 @@ public class SeatServiceImpl extends ServiceImpl<SeatMapper, Seat> implements IS
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void bookSeat(SeatBookingRequest request, Long userId) {
+        // 0. 信用积分校验：积分为0且在24小时禁约期内不允许预约
+        userService.checkBookingAllowed(userId);
+
         Long seatId = request.getSeatId();
 
         // 1. 解析并校验预约时间段

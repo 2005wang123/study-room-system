@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.example.studyroom.common.LoginAttemptService;
+import com.example.studyroom.common.constant.PointsRule;
 import com.example.studyroom.common.exception.BusinessException;
 import com.example.studyroom.dto.*;
 import com.example.studyroom.common.constant.ReservationStatus;
@@ -24,6 +25,7 @@ import org.springframework.util.StringUtils;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,6 +38,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     private final JwtUtil jwtUtil;
     private final PasswordValidator passwordValidator;
     private final LoginAttemptService loginAttemptService;
+
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     @Override
     public LoginResponse login(LoginRequest request) {
@@ -133,6 +137,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                 .role(user.getRole())
                 .status(user.getStatus())
                 .isFirstLogin(user.getIsFirstLogin() == 1)
+                .points(user.getPoints())
+                .bookBanUntil(user.getBookBanUntil())
                 .build();
     }
 
@@ -187,6 +193,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (user.getIsFirstLogin() == null) {
             user.setIsFirstLogin(1);
         }
+        if (user.getPoints() == null) {
+            user.setPoints(PointsRule.DEFAULT_POINTS);
+        }
+        // 新用户/重建用户清空历史禁约
+        user.setBookBanUntil(null);
 
         // 4. 设置时间
         LocalDateTime now = LocalDateTime.now();
@@ -232,6 +243,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         user.setCreateTime(now);
         user.setUpdateTime(now);
         user.setPasswordUpdatedAt(now);
+        user.setPoints(PointsRule.DEFAULT_POINTS);
 
         // 4. 保存
         userMapper.insert(user);
@@ -247,6 +259,78 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     public Integer getUserRole(Long userId) {
         User user = userMapper.selectById(userId);
         return user == null ? null : user.getRole();
+    }
+
+    @Override
+    public void checkBookingAllowed(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        if (user.getStatus() != null && user.getStatus() == 0) {
+            throw new BusinessException("账号已被禁用，请联系管理员");
+        }
+        int points = user.getPoints() == null ? PointsRule.DEFAULT_POINTS : user.getPoints();
+        if (points <= 0 && user.getBookBanUntil() != null
+                && LocalDateTime.now().isBefore(user.getBookBanUntil())) {
+            throw new BusinessException("信用积分为0，需等待至 "
+                    + user.getBookBanUntil().format(DATE_TIME_FORMATTER) + " 后才能预约");
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void applyViolationPenalty(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            return;
+        }
+        int points = user.getPoints() == null ? PointsRule.DEFAULT_POINTS : user.getPoints();
+        int newPoints = Math.max(0, points - PointsRule.VIOLATION_DEDUCTION);
+        LocalDateTime now = LocalDateTime.now();
+        user.setPoints(newPoints);
+        if (newPoints <= 0) {
+            LocalDateTime banUntil = now.plusHours(PointsRule.BAN_HOURS);
+            // 已有更晚的禁约截止时间则保留，避免缩短已有惩罚
+            if (user.getBookBanUntil() != null && user.getBookBanUntil().isAfter(banUntil)) {
+                banUntil = user.getBookBanUntil();
+            }
+            user.setBookBanUntil(banUntil);
+        }
+        user.setUpdateTime(now);
+        userMapper.updateById(user);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int adjustPoints(Long userId, int delta) {
+        if (delta == 0) {
+            throw new BusinessException("积分变动值不能为0");
+        }
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        int points = user.getPoints() == null ? PointsRule.DEFAULT_POINTS : user.getPoints();
+        int newPoints = Math.max(0, points + delta);
+        LocalDateTime now = LocalDateTime.now();
+        user.setPoints(newPoints);
+        if (newPoints <= 0) {
+            LocalDateTime banUntil = now.plusHours(PointsRule.BAN_HOURS);
+            if (user.getBookBanUntil() != null && user.getBookBanUntil().isAfter(banUntil)) {
+                banUntil = user.getBookBanUntil();
+            }
+            user.setBookBanUntil(banUntil);
+        } else {
+            // 积分恢复为正数时立即解除预约限制
+            user.setBookBanUntil(null);
+        }
+        user.setUpdateTime(now);
+        userMapper.updateById(user);
+        return newPoints;
     }
 
     // ===== 管理员 =====
@@ -265,6 +349,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                 .role(user.getRole())
                 .status(user.getStatus())
                 .isFirstLogin(user.getIsFirstLogin() != null && user.getIsFirstLogin() == 1)
+                .points(user.getPoints())
+                .bookBanUntil(user.getBookBanUntil())
                 .createTime(user.getCreateTime())
                 .build()).collect(Collectors.toList()));
         return voPage;

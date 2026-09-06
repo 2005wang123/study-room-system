@@ -18,6 +18,7 @@ import com.example.studyroom.mapper.FloorMapper;
 import com.example.studyroom.mapper.ReservationMapper;
 import com.example.studyroom.mapper.SeatMapper;
 import com.example.studyroom.service.IReservationService;
+import com.example.studyroom.service.IUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,7 @@ public class ReservationServiceImpl
     private final SeatMapper seatMapper;
     private final FloorMapper floorMapper;
     private final AreaMapper areaMapper;
+    private final IUserService userService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -60,7 +62,7 @@ public class ReservationServiceImpl
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, noRollbackFor = BusinessException.class)
     public void checkIn(Long reservationId, Long userId) {
         Reservation reservation = getOwnedReservation(reservationId, userId);
         if (reservation.getStatus() != ReservationStatus.PENDING) {
@@ -72,7 +74,13 @@ public class ReservationServiceImpl
             throw new BusinessException("未到签到时间，请在预约开始前30分钟内签到");
         }
         if (now.isAfter(reservation.getEndTime())) {
-            throw new BusinessException("预约已结束，无法签到");
+            // 已过结束时间仍未签到：不允许签到，直接记为违约并释放座位，避免依赖定时任务造成状态滞后
+            reservation.setStatus(ReservationStatus.VIOLATED);
+            updateById(reservation);
+            releaseSeatIfFree(reservation.getSeatId());
+            // 违约扣分：扣100信用积分，扣至0触发24小时禁约
+            userService.applyViolationPenalty(reservation.getUserId());
+            throw new BusinessException("预约已结束，未按时签到，本次预约已记为违约并扣除100信用积分");
         }
         reservation.setStatus(ReservationStatus.IN_USE);
         updateById(reservation);
@@ -112,6 +120,9 @@ public class ReservationServiceImpl
 
     @Override
     public List<ReservationVO> getUserReservations(Long userId) {
+        // 读取前先兜底清理已过期未处理的预约，避免展示“已过结束时间却仍是待签到”的记录
+        cleanExpiredReservations();
+
         List<Reservation> reservations = list(new LambdaQueryWrapper<Reservation>()
                 .eq(Reservation::getUserId, userId)
                 .eq(Reservation::getIsDeleted, 0)
@@ -182,6 +193,9 @@ public class ReservationServiceImpl
                                                  LocalDate startDate,
                                                  LocalDate endDate,
                                                  int pageNum, int pageSize) {
+        // 读取前先兜底清理已过期未处理的预约，保证管理员端状态实时准确
+        cleanExpiredReservations();
+
         LambdaQueryWrapper<Reservation> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(status != null, Reservation::getStatus, status)
                 .ge(startDate != null, Reservation::getStartTime, startDate.atStartOfDay())
@@ -208,6 +222,11 @@ public class ReservationServiceImpl
                     .set(Reservation::getStatus, ReservationStatus.VIOLATED)
                     .in(Reservation::getId, expiredIds)
                     .eq(Reservation::getIsDeleted, 0));
+            // 违约扣分：扣除用户信用积分（扣至0触发24小时禁约）
+            expired.stream().map(Reservation::getUserId)
+                    .filter(uid -> uid != null)
+                    .distinct()
+                    .forEach(userService::applyViolationPenalty);
             releaseSeats(expired.stream().map(Reservation::getSeatId).distinct().collect(Collectors.toList()));
             cleaned += expired.size();
         }

@@ -70,6 +70,17 @@ public class AdminUserController {
     }
 
     /**
+     * 调整用户信用积分（delta>0加分，delta<0减分；扣至0后触发24小时禁约）
+     */
+    @PutMapping("/users/{id}/points")
+    @RequireRole(role = 1)
+    public Result<Integer> adjustPoints(@PathVariable Long id, @RequestParam Integer delta) {
+        int newPoints = userService.adjustPoints(id, delta);
+        String action = delta > 0 ? "加分" : "扣分";
+        return Result.success(action + "成功，当前积分：" + newPoints, newPoints);
+    }
+
+    /**
      * 删除用户（逻辑删除；存在进行中预约时不允许删除）
      */
     @DeleteMapping("/users/{id}")
