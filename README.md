@@ -2,7 +2,7 @@
 
 > 一个**前后端分离**的自习室座位预约管理系统：学生在线选座预约、签到签退，管理员可视化绘制楼层结构图并统一管理座位、公告与用户。
 >
-> 技术栈：**Spring Boot 3 + MyBatis-Plus + MySQL + Vue 3 + Vite**
+> 技术栈：**Spring Boot 3 + MyBatis-Plus + MySQL + Vue 3 + TypeScript + Vite**
 >
 > 📖 在线接口文档（GitHub Pages，无需启动后端即可查看全部接口）：[https://2005wang123.github.io/study-room-system/](https://2005wang123.github.io/study-room-system/)
 
@@ -56,7 +56,7 @@
 | 模块 | 技术 |
 | --- | --- |
 | 后端 | Java 17 · Spring Boot 3.5.5 · Spring Security · MyBatis-Plus 3.5.7 · MySQL · JWT (jjwt 0.11.5) · Caffeine · Knife4j 4.5.0 · Lombok 1.18.46 |
-| 前端 | Vue 3 · Vite 8 · Vue Router · Pinia · Axios · Element Plus · Fabric.js 7（楼层结构图绘制） |
+| 前端 | Vue 3 · TypeScript · Vite 8 · Vue Router · Pinia · Axios · Element Plus · 自研 SVG 楼层绘制器 |
 | 工具 | Maven · npm · IntelliJ IDEA / VS Code · MySQL 8.x |
 
 ---
