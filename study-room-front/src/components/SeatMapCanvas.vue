@@ -24,7 +24,17 @@
           stroke-width="2"
           rx="8"
         />
-        <text v-if="a.name" :x="a.x + 10" :y="a.y + 24" class="area-name">{{ a.name }}</text>
+        <text
+          v-if="a.name"
+          :x="areaLabel(a).x"
+          :y="areaLabel(a).y"
+          :text-anchor="areaLabel(a).anchor"
+          :font-size="areaLabel(a).fontSize"
+          :fill="a.nameColor || 'rgba(255,255,255,0.6)'"
+          class="area-name"
+        >
+          {{ a.name }}
+        </text>
       </g>
 
       <!-- 墙体 -->
@@ -67,6 +77,11 @@
         {{ t.content }}
       </text>
 
+      <!-- 通用图形（桌椅/装饰） -->
+      <g v-for="g in graphics" :key="g.id" class="map-graphic" :transform="graphicTransform(g)">
+        <ShapeGlyph :shape="g" />
+      </g>
+
       <!-- 座位 -->
       <g
         v-for="s in seats"
@@ -77,7 +92,9 @@
         @mouseenter="onSeatEnter(s, $event)"
         @mouseleave="tip.visible = false"
       >
+        <!-- 方形（圆角） -->
         <rect
+          v-if="seatShapeOf(s) === 'rect'"
           :x="-(s.w || 44) / 2"
           :y="-(s.h || 44) / 2"
           :width="s.w || 44"
@@ -88,13 +105,36 @@
           rx="6"
           class="seat-rect"
         />
+        <!-- 圆形 / 椭圆 -->
+        <ellipse
+          v-else-if="seatShapeOf(s) === 'round'"
+          cx="0"
+          cy="0"
+          :rx="Math.max(0.5, (s.w || 44) / 2)"
+          :ry="Math.max(0.5, (s.h || 44) / 2)"
+          :fill="seatFill(s)"
+          stroke="#d8d8e0"
+          stroke-width="1.5"
+          class="seat-rect"
+        />
+        <!-- 菱形 -->
+        <polygon
+          v-else
+          :points="diamondLocal(s)"
+          :fill="seatFill(s)"
+          stroke="#d8d8e0"
+          stroke-width="1.5"
+          stroke-linejoin="round"
+          class="seat-rect"
+        />
         <text
-          :x="0"
+          :x="seatLabel(s).x"
           :y="0"
-          text-anchor="middle"
+          :text-anchor="seatLabel(s).anchor"
           dominant-baseline="central"
           class="seat-no"
-          :font-size="Math.max(10, Math.min(14, (s.w || 44) / 4))"
+          :font-size="seatLabelFont(s)"
+          :fill="s.labelColor || '#ffffff'"
         >
           {{ s.seatNo }}
         </text>
@@ -119,7 +159,9 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { LayoutSeatShape, LayoutShape } from '@/types/layout'
+import ShapeGlyph from '@/components/floor-editor/ShapeGlyph.vue'
+import type { LayoutGraphicShape, LayoutSeatShape, LayoutShape } from '@/types/layout'
+import { areaNamePos, seatLabelFontSize, seatLabelPos } from '@/utils/floorEditor'
 
 /** getSeats 返回的座位实时状态（字段较宽松，兼容历史数据） */
 interface SeatStatusLike {
@@ -150,7 +192,33 @@ const areas = computed(() => props.layout?.areas || [])
 const walls = computed(() => props.layout?.walls || [])
 const paths = computed(() => props.layout?.paths || [])
 const texts = computed(() => props.layout?.texts || [])
+const graphics = computed(() => props.layout?.shapes || [])
 const seats = computed(() => props.layout?.seats || [])
+
+const seatShapeOf = (s: LayoutSeatShape): string => s.shape || 'rect'
+const seatLabel = (s: LayoutSeatShape) => seatLabelPos(s)
+const seatLabelFont = (s: LayoutSeatShape) => seatLabelFontSize(s)
+const areaLabel = (a: {
+  x: number
+  y: number
+  w: number
+  h: number
+  nameSize?: number
+  nameAlign?: 'left' | 'center' | 'right'
+}) => areaNamePos(a)
+
+const diamondLocal = (s: LayoutSeatShape): string => {
+  const w = s.w || 44
+  const h = s.h || 44
+  return `0,${-h / 2} ${w / 2},0 0,${h / 2} ${-w / 2},0`
+}
+
+const graphicTransform = (g: LayoutGraphicShape): string => {
+  if (!g.rotation) return ''
+  const cx = g.x + g.w / 2
+  const cy = g.y + g.h / 2
+  return `translate(${cx} ${cy}) rotate(${g.rotation}) translate(${-cx} ${-cy})`
+}
 
 const seatDataMap = computed(() => {
   const map = new Map<string, SeatStatusLike>()
@@ -255,8 +323,6 @@ const pointsToStr = (points?: number[][]): string => {
   min-width: 600px;
 }
 .map-area .area-name {
-  fill: rgba(255, 255, 255, 0.6);
-  font-size: 18px;
   font-weight: 600;
   pointer-events: none;
   user-select: none;
@@ -276,7 +342,6 @@ const pointsToStr = (points?: number[][]): string => {
   stroke-width: 2.5;
 }
 .seat-no {
-  fill: #ffffff;
   font-weight: 600;
   pointer-events: none;
   user-select: none;
@@ -287,10 +352,32 @@ const pointsToStr = (points?: number[][]): string => {
   text-align: center;
   padding: 48px 0;
 }
+.map-tip {
+  position: absolute;
+  z-index: 30;
+  max-width: 260px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(24, 24, 32, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  text-align: left;
+}
+.map-tip.below {
+  transform: translate(-50%, 0);
+}
+.map-tip-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.4;
+}
+.map-tip-sub {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #a9a9b8;
+  line-height: 1.4;
+}
 </style>
-
-/* 座位悬浮提示 */ .map-tip { position: absolute; z-index: 30; max-width: 260px; padding: 7px 10px; border-radius: 8px;
-background: rgba(24, 24, 32, 0.96); border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 8px 22px rgba(0, 0, 0,
-0.45); transform: translate(-50%, -100%); pointer-events: none; text-align: left; } .map-tip.below { transform:
-translate(-50%, 0); } .map-tip-title { font-size: 12px; font-weight: 600; color: #fff; line-height: 1.4; } .map-tip-sub
-{ margin-top: 3px; font-size: 11px; color: #a9a9b8; line-height: 1.4; }

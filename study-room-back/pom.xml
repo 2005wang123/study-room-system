@@ -16,7 +16,7 @@
 
     <groupId>com.example</groupId>
     <artifactId>study-room-system</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <name>StudyRoomApplication</name>
     <description>自习室管理系统后端</description>
 

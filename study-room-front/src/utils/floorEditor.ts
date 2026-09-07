@@ -1,5 +1,5 @@
 // src/utils/floorEditor.ts —— 楼层结构图编辑器的纯逻辑（可单测）
-import type { LayoutSeatShape } from '@/types/layout'
+import type { LayoutAlign, LayoutSeatShape } from '@/types/layout'
 
 /** 默认场景逻辑尺寸 */
 export const SCENE_W_DEFAULT = 1600
@@ -8,6 +8,10 @@ export const MIN_ZOOM = 0.2
 export const MAX_ZOOM = 3
 /** 默认座位边长 */
 export const DEFAULT_SEAT_SIZE = 44
+/** 区域名称默认字号 */
+export const DEFAULT_AREA_NAME_SIZE = 18
+/** 区域名称左右留白 */
+export const AREA_NAME_PAD = 10
 
 /** 生成画布内唯一 id */
 export function uid(prefix: string): string {
@@ -104,6 +108,34 @@ export interface RectLike {
   h: number
 }
 
+/** 两个轴对齐矩形是否相交 */
+export function rectsOverlap(
+  ax: number,
+  ay: number,
+  aw: number,
+  ah: number,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number
+): boolean {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
+}
+
+/** 矩形 a 是否完全被矩形 b 包含 */
+export function rectInside(
+  ax: number,
+  ay: number,
+  aw: number,
+  ah: number,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number
+): boolean {
+  return ax >= bx && ay >= by && ax + aw <= bx + bw && ay + ah <= by + bh
+}
+
 /**
  * 生成新座位编号：{楼层号}-{两位序号}，例如 1-01。
  * 依据画布内已有该楼层前缀的编号向后递增。
@@ -151,22 +183,90 @@ export function cloneJson<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
 }
 
+/** 缩放方向：n-上 s-下 e-右 w-左，组合为角点 */
+export type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
+
+/** 选中对象上的 8 个缩放手柄（场景坐标，dir 表示方向） */
+export function resizeHandlesFor(
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): Array<{ dir: ResizeDir; x: number; y: number }> {
+  const cx = x + w / 2
+  const cy = y + h / 2
+  return [
+    { dir: 'nw', x, y },
+    { dir: 'n', x: cx, y },
+    { dir: 'ne', x: x + w, y },
+    { dir: 'e', x: x + w, y: cy },
+    { dir: 'se', x: x + w, y: y + h },
+    { dir: 's', x: cx, y: y + h },
+    { dir: 'sw', x, y: y + h },
+    { dir: 'w', x, y: cy }
+  ]
+}
+
+/**
+ * 按方向调整矩形大小（保持最小尺寸并限制在场景内）。
+ * ox/oy/ow/oh 为拖动开始前的原始矩形。
+ */
+export function resizeRectInScene(
+  ox: number,
+  oy: number,
+  ow: number,
+  oh: number,
+  dir: ResizeDir,
+  dx: number,
+  dy: number,
+  minW = 10,
+  minH = 10,
+  sceneW = Infinity,
+  sceneH = Infinity
+): { x: number; y: number; w: number; h: number } {
+  const L = ox
+  const T = oy
+  const R = ox + ow
+  const B = oy + oh
+  let l = L
+  let t = T
+  let r = R
+  let b = B
+  if (dir.includes('w')) l = clamp(ox + dx, 0, Math.max(0, R - minW))
+  if (dir.includes('e')) r = clamp(R + dx, L + minW, Math.max(L + minW, sceneW))
+  if (dir.includes('n')) t = clamp(oy + dy, 0, Math.max(0, B - minH))
+  if (dir.includes('s')) b = clamp(B + dy, T + minH, Math.max(T + minH, sceneH))
+  const w = Math.max(minW, r - l)
+  const h = Math.max(minH, b - t)
+  return { x: round1(l), y: round1(t), w: round1(w), h: round1(h) }
+}
+/** 计算带旋转角矩形的外接轴对齐矩形 */
+export function rotatedBounds(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  rotationDeg = 0
+): { x: number; y: number; w: number; h: number } {
+  const rad = ((rotationDeg || 0) * Math.PI) / 180
+  const cw = Math.abs(w * Math.cos(rad)) + Math.abs(h * Math.sin(rad))
+  const ch = Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad))
+  const cx = x + w / 2
+  const cy = y + h / 2
+  return { x: cx - cw / 2, y: cy - ch / 2, w: cw, h: ch }
+}
+
 /** 计算选中框（近似文本宽度），用于覆盖层高亮 */
 export function boundsOf(kind: string, obj: unknown): { x: number; y: number; w: number; h: number } | null {
   if (!obj) return null
   switch (kind) {
     case 'area':
-    case 'seat': {
+    case 'seat':
+    case 'shape': {
       const o = obj as { x: number; y: number; w?: number; h?: number; rotation?: number }
       const w = o.w || DEFAULT_SEAT_SIZE
       const h = o.h || DEFAULT_SEAT_SIZE
-      // 旋转时用外接矩形近似
-      const rad = ((o.rotation || 0) * Math.PI) / 180
-      const cw = Math.abs(w * Math.cos(rad)) + Math.abs(h * Math.sin(rad))
-      const ch = Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad))
-      const cx = o.x + w / 2
-      const cy = o.y + h / 2
-      return { x: cx - cw / 2, y: cy - ch / 2, w: cw, h: ch }
+      return rotatedBounds(o.x, o.y, w, h, o.rotation || 0)
     }
     case 'wall': {
       const o = obj as { x1: number; y1: number; x2: number; y2: number }
@@ -199,6 +299,67 @@ export function boundsOf(kind: string, obj: unknown): { x: number; y: number; w:
   }
 }
 
+/** 对齐方式 -> SVG text-anchor */
+export function alignAnchor(align?: LayoutAlign): 'start' | 'middle' | 'end' {
+  if (align === 'center') return 'middle'
+  if (align === 'right') return 'end'
+  return 'start'
+}
+
+/**
+ * 区域名称的显示位置与对齐（在区域内部水平对齐，顶部垂直排布）。
+ * 返回值的 x/y 作为 <text> 的坐标（y 为基线）。
+ */
+export function areaNamePos(a: {
+  x: number
+  y: number
+  w: number
+  h: number
+  nameSize?: number
+  nameAlign?: LayoutAlign
+}): { x: number; y: number; anchor: 'start' | 'middle' | 'end'; fontSize: number } {
+  const fs = clamp(round1(a.nameSize || DEFAULT_AREA_NAME_SIZE), 8, 200)
+  const align = a.nameAlign || 'left'
+  const pad = Math.min(AREA_NAME_PAD, Math.max(2, a.w / 4))
+  let x: number
+  let anchor: 'start' | 'middle' | 'end'
+  if (align === 'center') {
+    x = a.x + a.w / 2
+    anchor = 'middle'
+  } else if (align === 'right') {
+    x = a.x + a.w - pad
+    anchor = 'end'
+  } else {
+    x = a.x + pad
+    anchor = 'start'
+  }
+  const y = Math.min(a.y + a.h - 4, a.y + 4 + fs)
+  return { x: round1(x), y: round1(y), anchor, fontSize: fs }
+}
+
+/**
+ * 座位编号在座位内的本地坐标（座位以中心为原点、可旋转）。
+ * x 为本地坐标，返回的 anchor 用于 <text>。
+ */
+export function seatLabelPos(s: { w?: number; h?: number; labelAlign?: LayoutAlign }): {
+  x: number
+  anchor: 'start' | 'middle' | 'end'
+} {
+  const w = s.w || DEFAULT_SEAT_SIZE
+  const align = s.labelAlign || 'center'
+  const pad = Math.min(4, Math.max(1, w / 10))
+  if (align === 'left') return { x: -(w / 2) + pad, anchor: 'start' }
+  if (align === 'right') return { x: w / 2 - pad, anchor: 'end' }
+  return { x: 0, anchor: 'middle' }
+}
+
+/** 座位编号字号：优先 labelSize，缺省按座位大小自适应 */
+export function seatLabelFontSize(s: { w?: number; h?: number; labelSize?: number }): number {
+  if (s.labelSize) return clamp(Math.round(s.labelSize), 6, 80)
+  const size = Math.min(s.w || DEFAULT_SEAT_SIZE, s.h || DEFAULT_SEAT_SIZE)
+  return clamp(Math.round(size / 4.5), 9, 16)
+}
+
 /** 座位颜色：按类型区分；维修中灰色 */
 export function seatFill(type: number | undefined, status: number | string | undefined): string {
   if (Number(status) === 3) return '#7a7a85'
@@ -219,6 +380,14 @@ export function areaDefaultStroke(): string {
   return '#667eea'
 }
 
+/** 通用图形默认填充/描边 */
+export function graphicDefaultFill(): string {
+  return 'rgba(140, 150, 180, 0.20)'
+}
+export function graphicDefaultStroke(): string {
+  return '#8f96ab'
+}
+
 export function isSeatNoDuplicate(seatNo: string, seatId: string | undefined, seats: LayoutSeatShape[]): boolean {
   const no = String(seatNo || '').trim()
   if (!no) return false
@@ -230,4 +399,3 @@ export function isSeatNoDuplicate(seatNo: string, seatId: string | undefined, se
         .toLowerCase() === no.toLowerCase()
   )
 }
-
