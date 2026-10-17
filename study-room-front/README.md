@@ -26,7 +26,7 @@
 
 | 命令 | 说明 |
 | --- | --- |
-| `npm run dev` | 启动开发服务器（端口 5137，代理 /api → localhost:8080） |
+| `npm run dev` | 启动开发服务器（默认端口 5137，被占用时自动顺延到 5138/5139；代理 /api → localhost:8080） |
 | `npm run build` | 类型检查 + 生产构建（= `type-check` + `vite build`） |
 | `npm run type-check` | 运行 `vue-tsc` 类型检查 |
 | `npm run lint` / `npm run lint:fix` | ESLint 检查 / 自动修复 |
@@ -38,11 +38,13 @@
 ```
 src
 ├── api/            # 后端接口封装（TypeScript 类型化，对应 study-room-back 接口）
-├── components/     # 业务组件（floor-editor/ = 楼层绘图编辑器与属性面板）
-├── router/         # Vue Router 配置
+├── assets/pet/     # 桌面宠物立绘（小夜 / 小晨，含睁眼与睡眠两套）
+├── components/     # 业务组件（floor-editor/ = 楼层绘图编辑器与属性面板；PetCompanion.vue = 桌面宠物）
+├── router/         # Vue Router 配置（含登录守卫）
 ├── types/          # 共享类型（api.ts / layout.ts）
 ├── utils/floorEditor.ts # 楼层绘图纯逻辑（含单元测试）
-├── views/SeatMap.vue # 主页面
+├── views/AuthView.vue  # 登录 / 注册首屏（含首次登录改密）
+├── views/SeatMap.vue # 主页面（座位地图）
 ├── env.d.ts        # Vite 客户端类型声明
 ├── main.ts         # 应用入口
 └── style.css       # 全局样式

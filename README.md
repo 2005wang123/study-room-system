@@ -5,6 +5,8 @@
 > 技术栈：**Spring Boot 3 + MyBatis-Plus + MySQL + Vue 3 + TypeScript + Vite**
 >
 > 📖 在线接口文档（GitHub Pages，无需启动后端即可查看全部接口）：[https://2005wang123.github.io/study-room-system/](https://2005wang123.github.io/study-room-system/)
+>
+> 🏷️ 当前版本：**v1.2.0**（前端 `package.json` 与后端 `pom.xml` 同步，更新日志见文末）
 
 ---
 
@@ -16,9 +18,9 @@
 | --- | --- |
 | ![座位地图](docs/screenshots/02-seat-map.png) | ![预约弹窗](docs/screenshots/03-booking.png) |
 
-| 登录 | 公告与评论 | 用户管理（管理员） | 楼层结构图编辑器（管理员） |
+| 登录 / 注册首屏 | 公告与评论 | 用户管理（管理员） | 楼层结构图编辑器（管理员） |
 | --- | --- | --- | --- |
-| ![登录弹窗](docs/screenshots/01-login.png) | ![公告与评论](docs/screenshots/04-announcements.png) | ![用户管理](docs/screenshots/05-admin-users.png) | ![楼层结构图编辑器](docs/screenshots/06-floor-editor.png) |
+| ![登录 / 注册首屏](docs/screenshots/01-login.png) | ![公告与评论](docs/screenshots/04-announcements.png) | ![用户管理](docs/screenshots/05-admin-users.png) | ![楼层结构图编辑器](docs/screenshots/06-floor-editor.png) |
 
 ---
 
@@ -26,13 +28,14 @@
 
 ### 👨‍🎓 学生端
 
-- 🔐 注册 / 登录：JWT 认证，BCrypt 密码加密，登录防爆破（失败锁定 + IP 限流）
+- 🔐 注册 / 登录：独立启动首屏页（`/login`，含登录 / 注册 / 首次登录改密），JWT 认证，BCrypt 密码加密，登录防爆破（失败锁定 + IP 限流）
 - 🗺️ 座位地图：按 **楼层 → 区域(房间) → 座位** 三级浏览，支持按楼层 / 区域 / 日期筛选
 - 🪑 在线预约：同一座位一天内可分多个时间段预约，支持**冲突时段校验、并发防超卖、单次最长 4 小时、开放时间 08:00–21:30**
 - 📅 智能提示：座位颜色实时反映当天可约情况；预约弹窗自动灰显已占用时段，冲突时间不可选
 - ✅ 签到 / 签退：预约状态自动流转（待签到 → 使用中 → 已完成），超时未签到记为违约（**扣 100 信用积分**，扣至 0 触发 24 小时禁约）
 - 📋 预约记录：查看自己的历史预约与当前状态，可取消未开始的预约
 - 📢 公告互动：查看公告、发表评论、删除自己的评论、点赞
+- 🐾 桌面宠物陪伴：夜读精灵「小夜」/ 晨读精灵「小晨」，支持拖拽、点击互动、定点散步、双击休眠、右键菜单切换角色，状态本地记忆
 
 ### 🛠️ 管理员端
 
@@ -84,8 +87,8 @@ study-room-system
 │   ├── src/api/                    # 接口封装（user/seat/announcement/floorLayout/floor）
 │   ├── src/types/                  # 共享类型（api.ts / layout.ts）
 │   ├── src/utils/                  # 工具与楼层绘图纯逻辑（含 Vitest 单测）
-│   ├── src/components/             # 业务组件（floor-editor/ 为楼层绘图、属性面板与楼层/区域管理）
-│   ├── src/views/                  # 页面
+│   ├── src/components/             # 业务组件（floor-editor/ 为楼层绘图、属性面板与楼层/区域管理；PetCompanion.vue 为桌面宠物）
+│   ├── src/views/                  # 页面（AuthView.vue 为登录/注册首屏，SeatMap.vue 为座位地图）
 │   └── vite.config.ts              # 开发服务器与 /api 代理配置
 └── docs/screenshots/               # README 效果截图
 ```
@@ -243,7 +246,7 @@ UPDATE sys_user SET role = 1 WHERE username = '你的学号';
 | `DB_USERNAME` / `DB_PASSWORD` | 数据库账号 / 密码 | `root` / `root` |
 | `JWT_SECRET` | JWT 签名密钥（生产环境必改，建议 ≥64 字节） | 内置开发密钥 |
 | `JWT_EXPIRATION` | Token 有效期（毫秒） | `86400000`（24 小时） |
-| `CORS_ALLOWED_ORIGINS` | 允许跨域的前端来源（逗号分隔） | `http://localhost:5137` |
+| `CORS_ALLOWED_ORIGINS` | 允许跨域的前端来源（逗号分隔） | `http://localhost:5137,http://localhost:5138,http://localhost:5139`（另默认放行 localhost/127.0.0.1 任意端口） |
 | `VITE_API_BASE_URL` | 前端请求的后端地址（前端构建时） | `/api` |
 
 ---
@@ -321,11 +324,25 @@ UPDATE sys_user SET role = 1 WHERE username = '你的学号';
 - 先登录（右上角「点击登录」）
 - 确认前端开发服务器代理生效：访问 http://localhost:5137/api/xxx 应能转发到 8080；后端未启动时请先启动后端
 
-### 5. `npm install` 很慢或失败
+### 5. 登录接口返回 403 Forbidden（不是密码错误）
+
+**现象**：浏览器控制台显示 `POST http://localhost:5138/api/user/login 403 (Forbidden)`，响应体为 `Invalid CORS request`。
+
+**原因**：Vite 默认端口 5137，端口被占用时会自动顺延到 5138/5139。代理转发会保留浏览器的 `Origin` 头，后端 `CorsFilter` 发现该来源不在 `cors.allowed-origins` 白名单内，就会在到达 Controller 之前直接拒绝为 403 —— **此时账号密码根本没有被校验**。
+
+**判断依据**：密码错误返回的是 **400**，响应体为 `{"code":500,"message":"学号或密码错误"}`；只有 403 才是跨域来源问题。
+
+**处理**：
+
+1. 后端 `application.yml` 的 `cors.allowed-origins` 已包含 5137/5138/5139，并额外放行了 `localhost` / `127.0.0.1` 的任意端口，修改后**需重启后端**生效。
+2. 临时绕过：直接用 http://localhost:5137 访问（该端口已在白名单内）。
+3. 开发时只保留一个 dev server 实例，避免端口漂移。
+
+### 6. `npm install` 很慢或失败
 
 - 可切换国内镜像：`npm config set registry https://registry.npmmirror.com` 后重试
 
-### 6. 忘记管理员密码怎么办？
+### 7. 忘记管理员密码怎么办？
 
 直接用 SQL 重置（初始密码规则为身份证号后 6 位，也可在后台「用户管理」中重置）：
 
@@ -335,6 +352,37 @@ UPDATE sys_user
 SET password = '此处填入 BCrypt 加密后的密码', is_first_login = 1
 WHERE username = '你的学号';
 ```
+
+---
+
+## 📝 更新日志
+
+### v1.2.0（2026-10-17）
+
+**前端**
+
+- ✨ 新增独立登录 / 注册首屏页 `AuthView.vue`（路由 `/login`），取代原来的 `LoginModal.vue` 弹窗，同时承载首次登录强制改密
+- ✨ 新增桌面宠物组件 `PetCompanion.vue`：夜读精灵「小夜」/ 晨读精灵「小晨」，支持拖拽、点击互动、定点散步、双击休眠、右键菜单切换角色与开关柔光，状态本地记忆，并提供 `pet:say` / `pet:switch` 等对外事件 API
+- 🔧 新增路由守卫：启动首屏强制进入登录页、未登录访问受保护页面跳转 `/login`、未匹配路径重定向首页
+
+**后端**
+
+- 🐛 **修复登录接口返回 403**：Vite 端口漂移（5137 被占用后自动顺延到 5138）时，代理转发的 `Origin` 不在 `cors.allowed-origins` 内，请求在到达 Controller 前即被 `CorsFilter` 拒绝，账号密码根本未校验
+- 🔧 `CorsConfig` 增加 `localhost` / `127.0.0.1` 任意端口的兜底白名单，彻底规避开发环境端口漂移
+- 🔧 跨域被拒时返回结构化 JSON（含当前白名单），替代裸文本 `Invalid CORS request`，并在启动时打印白名单日志
+
+**文档**
+
+- 📖 README 新增「登录接口返回 403 Forbidden（不是密码错误）」FAQ、版本标记与本章更新日志
+
+> ⚠️ 升级提示：修改 `application.yml` 与 `CorsConfig.java` 后需**重启后端**生效（Spring Boot 不支持配置热更新）。
+
+### v1.1.0（2026-09-07）
+
+- 🎨 楼层结构图 SVG 编辑器增强：区域 / 墙体 / 自由画笔 / 座位 / 文字 / 底图，支持草稿与发布
+- 🏢 楼层 / 区域（房间）管理，座位按三级结构浏览与筛选
+- 💎 信用积分与违约停约机制（违约扣 100 分，扣至 0 自动禁约 24 小时）
+- 🧩 前端完整 TypeScript 工程化（类型定义、`vue-tsc` 类型检查、Vitest 单测）
 
 ---
 

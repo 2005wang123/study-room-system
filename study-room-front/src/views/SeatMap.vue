@@ -198,7 +198,7 @@
         <div v-else class="state-wrapper">
           <div class="state-icon">🔒</div>
           <p>请先登录后查看预约记录</p>
-          <button class="state-btn" @click="isLoginVisible = true">去登录</button>
+          <button class="state-btn" @click="goLogin">去登录</button>
         </div>
       </template>
 
@@ -213,7 +213,7 @@
         <div v-else class="state-wrapper">
           <div class="state-icon">🔒</div>
           <p>请先登录后进入个人中心</p>
-          <button class="state-btn" @click="isLoginVisible = true">去登录</button>
+          <button class="state-btn" @click="goLogin">去登录</button>
         </div>
       </template>
 
@@ -259,8 +259,7 @@
       </template>
     </main>
 
-    <!-- 登录弹窗 -->
-    <LoginModal v-model:visible="isLoginVisible" @login-success="handleLoginSuccess" />
+    <!-- 预约弹窗 -->
     <SeatBookingModal
       v-model:visible="bookingVisible"
       :seat="bookingSeat"
@@ -273,10 +272,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { getSeats, getFloors, getAreas, bookSeat, cancelBooking } from '@/api/seat'
 import { getPublishedLayout } from '@/api/floorLayout'
 import { getAnnouncements } from '@/api/announcement'
-import LoginModal from '@/components/LoginModal.vue'
 import SeatBookingModal from '@/components/SeatBookingModal.vue'
 import ReservationRecords from '@/components/ReservationRecords.vue'
 import ProfileCenter from '@/components/ProfileCenter.vue'
@@ -292,11 +291,14 @@ import type {
   AreaInfo,
   FloorInfo,
   FloorLayoutData,
-  LoginResult,
   SeatQuery,
   SeatReservation
 } from '@/types/api'
 import type { LayoutShape } from '@/types/layout'
+
+const router = useRouter()
+// 跳转到登录 / 注册首屏
+const goLogin = () => router.push('/login')
 
 // --- 本地类型 ---
 interface SeatRecord {
@@ -341,7 +343,6 @@ interface UserState {
 
 // --- 响应式数据 ---
 const isSidebarOpen = ref(true)
-const isLoginVisible = ref(false)
 const isDarkTheme = ref(true)
 const activeMenu = ref('home')
 const seats = ref<SeatRecord[]>([])
@@ -641,9 +642,7 @@ const handleSeatClick = async (seat: ClickSeat) => {
   }
 
   if (!userInfo.value.isLoggedIn) {
-    if (window.confirm('请先登录，是否现在登录？')) {
-      isLoginVisible.value = true
-    }
+    goLogin()
     return
   }
 
@@ -746,7 +745,7 @@ const handleMenuClick = (key: string) => {
 
   // 预约记录 / 个人中心需要登录
   if (!userInfo.value.isLoggedIn && (key === 'records' || key === 'profile')) {
-    isLoginVisible.value = true
+    goLogin()
     return
   }
 
@@ -818,31 +817,7 @@ const toggleTheme = () => {
 
 // --- 登录相关 ---
 const handleLogin = () => {
-  isLoginVisible.value = true
-}
-
-const handleLoginSuccess = (userData: LoginResult & { name?: string; avatar?: string }) => {
-  userInfo.value = {
-    isLoggedIn: true,
-    name: userData.username || userData.name || '用户',
-    avatar: userData.avatar || '',
-    userId: userData.id,
-    role: userData.role || 0,
-    needChangePassword: userData.needChangePassword || false,
-    isFirstLogin: userData.isFirstLogin || false
-  }
-
-  // 保存用户信息到本地
-  localStorage.setItem('userInfo', JSON.stringify(userInfo.value))
-  // 保存token
-  if (userData.token) {
-    localStorage.setItem('token', userData.token)
-  }
-
-  isLoginVisible.value = false
-
-  // 重新获取座位数据
-  fetchSeats()
+  goLogin()
 }
 
 const handleLogout = () => {
@@ -878,17 +853,17 @@ const handleSwitchAccount = () => {
     role: 0
   }
 
-  // 重新获取座位数据，并弹出登录框方便登录其他账号
+  // 重新获取座位数据，并跳转到登录页方便登录其他账号
   fetchSeats()
-  isLoginVisible.value = true
+  goLogin()
   showToast('已退出当前账号，请登录其他账号', 'info')
 }
 
 // 监听未授权事件
 const handleUnauthorized = () => {
-  // token过期，弹出登录框
-  isLoginVisible.value = true
-  // 清除用户信息
+  // token 过期，清除本地凭据并跳转到登录页
+  localStorage.removeItem('token')
+  localStorage.removeItem('userInfo')
   userInfo.value = {
     isLoggedIn: false,
     name: '',
@@ -897,6 +872,7 @@ const handleUnauthorized = () => {
     role: 0
   }
   showToast('登录已过期，请重新登录', 'warning')
+  goLogin()
 }
 
 onMounted(() => {

@@ -46,8 +46,10 @@ password:
   require-upper-lower: true
 
 # CORS 允许来源（逗号分隔），生产环境请改为正式前端域名
+# 注意：Vite 默认端口 5137，端口被占用时会自动顺延到 5138/5139，这里一并放行，
+# 否则来源不在白名单时会被 CorsFilter 直接拒绝为 403 Invalid CORS request。
 cors:
-  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5137}
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5137,http://localhost:5138,http://localhost:5139,http://127.0.0.1:5137,http://127.0.0.1:5138,http://127.0.0.1:5139}
 
 logging:
   level:
